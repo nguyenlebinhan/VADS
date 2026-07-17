@@ -1,2 +1,1 @@
 """VADS backend test suite."""
-

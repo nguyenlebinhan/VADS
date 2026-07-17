@@ -1,4 +1,3 @@
-
 from sqlalchemy.orm import Session
 
 from app.exceptions import AppError, InvalidStateTransitionError, NotFoundError
@@ -9,14 +8,15 @@ from app.model.schemas.processing import ProcessingStatusResponse
 from app.service.base import Service
 
 STEP_MESSAGES: dict[ProcessingStep, str] = {
-    ProcessingStep.WAITING_FOR_PROCESSING: "Tài liệu đang chờ xử lý",
-    ProcessingStep.EXTRACTING_TEXT: "Đang trích xuất nội dung văn bản",
-    ProcessingStep.DETECTING_PAGE_BOUNDARIES: "Đang xác định ranh giới trang",
-    ProcessingStep.DETECTING_STRUCTURE: "Đang nhận diện điều, khoản và mục",
-    ProcessingStep.CREATING_CHUNKS: "Đang chia tài liệu thành các đoạn có ngữ nghĩa",
-    ProcessingStep.GENERATING_SUMMARY: "Đang tạo bản tóm tắt",
-    ProcessingStep.BUILDING_KNOWLEDGE_GRAPH: "Đang xây dựng đồ thị tri thức",
-    ProcessingStep.INDEXING_VECTOR_DATA: "Đang lập chỉ mục dữ liệu vector",
+    ProcessingStep.VALIDATING_FILE: "Đang kiểm tra tệp",
+    ProcessingStep.DETECTING_PDF_TYPE: "Đang phân loại tài liệu",
+    ProcessingStep.RENDERING_PAGES: "Đang render trang",
+    ProcessingStep.OCR_PROCESSING: "Đang nhận dạng và trích xuất văn bản",
+    ProcessingStep.DETECTING_STRUCTURE: "Đang nhận diện cấu trúc pháp lý",
+    ProcessingStep.CREATING_CHUNKS: "Đang tạo các đoạn dữ liệu có cấu trúc",
+    ProcessingStep.GENERATING_SUMMARY: "Đang chờ module tóm tắt",
+    ProcessingStep.BUILDING_KNOWLEDGE_GRAPH: "Đang chờ module đồ thị tri thức",
+    ProcessingStep.INDEXING_VECTOR_DATA: "Đang chờ module lập chỉ mục",
     ProcessingStep.COMPLETED: "Đã xử lý tài liệu thành công",
 }
 
@@ -35,15 +35,18 @@ ALLOWED_TRANSITIONS: dict[ProcessingStatus, set[ProcessingStatus]] = {
         ProcessingStatus.COMPLETED,
         ProcessingStatus.FAILED,
         ProcessingStatus.CANCELLED,
+        ProcessingStatus.NEEDS_REVIEW,
     },
     ProcessingStatus.COMPLETED: set(),
     ProcessingStatus.FAILED: set(),
     ProcessingStatus.CANCELLED: set(),
+    ProcessingStatus.NEEDS_REVIEW: set(),
 }
 TERMINAL_STATUSES = {
     ProcessingStatus.COMPLETED,
     ProcessingStatus.FAILED,
     ProcessingStatus.CANCELLED,
+    ProcessingStatus.NEEDS_REVIEW,
 }
 
 
@@ -65,6 +68,9 @@ class ProcessingStateService(Service):
         status: ProcessingStatus,
         progress: int,
         current_step: ProcessingStep,
+        current_page: int | None = None,
+        total_pages: int | None = None,
+        message: str | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
         commit: bool = True,
@@ -98,6 +104,24 @@ class ProcessingStateService(Service):
                 message="Tiến độ xử lý không được giảm.",
                 details={"currentProgress": job.progress, "targetProgress": progress},
             )
+        if current_page is not None and current_page < 0:
+            raise AppError(
+                status_code=422,
+                code="INVALID_CURRENT_PAGE",
+                message="Chỉ số trang hiện tại không hợp lệ.",
+            )
+        if total_pages is not None and total_pages < 0:
+            raise AppError(
+                status_code=422,
+                code="INVALID_TOTAL_PAGES",
+                message="Tổng số trang không hợp lệ.",
+            )
+        if current_page is not None and total_pages is not None and current_page > total_pages:
+            raise AppError(
+                status_code=422,
+                code="INVALID_PAGE_PROGRESS",
+                message="Trang hiện tại không được vượt quá tổng số trang.",
+            )
         if status == ProcessingStatus.COMPLETED:
             progress = 100
             current_step = ProcessingStep.COMPLETED
@@ -112,6 +136,10 @@ class ProcessingStateService(Service):
         job.status = status
         job.progress = progress
         job.current_step = current_step
+        job.current_page = current_page
+        if total_pages is not None:
+            job.total_pages = total_pages
+        job.message = message
         job.error_code = error_code
         job.error_message = error_message
         job.updated_at = now
@@ -136,15 +164,18 @@ class ProcessingStateService(Service):
 
     @staticmethod
     def to_response(job: ProcessingJob) -> ProcessingStatusResponse:
-        message = job.error_message or STEP_MESSAGES[job.current_step]
+        message = job.message or job.error_message or STEP_MESSAGES[job.current_step]
         return ProcessingStatusResponse(
             document_id=job.document_id,
             status=job.status,
             progress=job.progress,
             current_step=job.current_step,
+            current_page=job.current_page,
+            total_pages=job.total_pages,
             message=message,
             started_at=job.started_at,
             updated_at=job.updated_at,
             completed_at=job.completed_at,
             error_code=job.error_code,
+            error_message=job.error_message,
         )

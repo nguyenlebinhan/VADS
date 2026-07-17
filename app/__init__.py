@@ -1,2 +1,1 @@
 """VADS backend application package."""
-

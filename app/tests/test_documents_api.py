@@ -27,21 +27,21 @@ def test_upload_get_and_poll_pdf(
     response = upload_pdf(client, workspace_id)
 
     assert response.status_code == 201
-    upload_body = response.json()
+    upload_body = response.json()["data"]
     document_id = upload_body["documentId"]
     assert upload_body == {
         "documentId": document_id,
         "workspaceId": workspace_id,
         "status": "UPLOADED",
         "progress": 0,
-        "currentStep": "WAITING_FOR_PROCESSING",
+        "currentStep": "VALIDATING_FILE",
     }
     assert len(application.state.fake_storage.objects) == 1
     assert len(application.state.fake_dispatcher.processing_job_ids) == 1
 
     metadata_response = client.get(f"/api/documents/{document_id}")
     assert metadata_response.status_code == 200
-    metadata = metadata_response.json()
+    metadata = metadata_response.json()["data"]
     assert metadata["documentId"] == document_id
     assert metadata["displayName"] == "Dự thảo kế hoạch"
     assert metadata["originalFilename"] == "du-thao.pdf"
@@ -52,7 +52,7 @@ def test_upload_get_and_poll_pdf(
 
     status_response = client.get(f"/api/documents/{document_id}/status")
     assert status_response.status_code == 200
-    status_body = status_response.json()
+    status_body = status_response.json()["data"]
     assert status_body["status"] == "UPLOADED"
     assert status_body["progress"] == 0
     assert status_body["message"] == "Tài liệu đang chờ xử lý"
@@ -64,18 +64,16 @@ def test_status_polling_reflects_worker_progress(
     application: FastAPI,
     workspace_id: str,
 ) -> None:
-    document_id = upload_pdf(client, workspace_id).json()["documentId"]
+    document_id = upload_pdf(client, workspace_id).json()["data"]["documentId"]
     with application.state.session_factory() as session:
-        job = session.scalar(
-            select(ProcessingJob).where(ProcessingJob.document_id == document_id)
-        )
+        job = session.scalar(select(ProcessingJob).where(ProcessingJob.document_id == document_id))
         assert job is not None
         state_service = ProcessingStateService(session)
         state_service.transition(
             job.id,
             status=ProcessingStatus.QUEUED,
             progress=0,
-            current_step=ProcessingStep.WAITING_FOR_PROCESSING,
+            current_step=ProcessingStep.VALIDATING_FILE,
         )
         state_service.transition(
             job.id,
@@ -86,11 +84,11 @@ def test_status_polling_reflects_worker_progress(
 
     response = client.get(f"/api/documents/{document_id}/status")
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["data"]
     assert body["status"] == "PROCESSING"
     assert body["progress"] == 65
     assert body["currentStep"] == "DETECTING_STRUCTURE"
-    assert body["message"] == "Đang nhận diện điều, khoản và mục"
+    assert body["message"] == "Đang nhận diện cấu trúc pháp lý"
     assert "startedAt" in body
 
 
@@ -104,7 +102,8 @@ def test_docx_upload_is_validated_by_zip_structure(
     )
 
     assert response.status_code == 201
-    document = client.get(f"/api/documents/{response.json()['documentId']}").json()
+    document_id = response.json()["data"]["documentId"]
+    document = client.get(f"/api/documents/{document_id}").json()["data"]
     assert document["mimeType"] == DOCX_MIME
     assert document["displayName"] == "van-ban"
 
@@ -120,12 +119,12 @@ def test_duplicate_checksum_is_rejected(
     assert second.status_code == 409
     error = second.json()["error"]
     assert error["code"] == "DUPLICATE_DOCUMENT"
-    assert error["details"]["existingDocumentId"] == first.json()["documentId"]
+    assert error["details"]["existingDocumentId"] == first.json()["data"]["documentId"]
 
 
 def test_same_checksum_is_allowed_in_another_workspace(client: TestClient) -> None:
-    workspace_one = client.post("/api/workspaces", json={"name": "WS one"}).json()["id"]
-    workspace_two = client.post("/api/workspaces", json={"name": "WS two"}).json()["id"]
+    workspace_one = client.post("/api/workspaces", json={"name": "WS one"}).json()["data"]["id"]
+    workspace_two = client.post("/api/workspaces", json={"name": "WS two"}).json()["data"]["id"]
 
     assert upload_pdf(client, workspace_one).status_code == 201
     assert upload_pdf(client, workspace_two).status_code == 201
@@ -154,6 +153,19 @@ def test_mime_extension_and_magic_bytes_must_agree(
     assert bad_magic.json()["error"]["code"] == "INVALID_FILE_SIGNATURE"
     assert fake_docx.status_code == 415
     assert fake_docx.json()["error"]["code"] == "INVALID_FILE_SIGNATURE"
+
+
+def test_unsupported_file_type_is_rejected(
+    client: TestClient,
+    workspace_id: str,
+) -> None:
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("notes.txt", b"plain text", "text/plain")},
+    )
+
+    assert response.status_code == 415
+    assert response.json()["error"]["code"] == "UNSUPPORTED_FILE_EXTENSION"
 
 
 def test_empty_oversized_and_dangerous_files_are_rejected(
@@ -186,12 +198,12 @@ def test_delete_is_soft_and_schedules_policy_driven_purge(
     application: FastAPI,
     workspace_id: str,
 ) -> None:
-    document_id = upload_pdf(client, workspace_id).json()["documentId"]
+    document_id = upload_pdf(client, workspace_id).json()["data"]["documentId"]
 
     response = client.delete(f"/api/documents/{document_id}")
 
     assert response.status_code == 200
-    assert response.json() == {"documentId": document_id, "status": "DELETED"}
+    assert response.json()["data"] == {"documentId": document_id, "status": "DELETED"}
     assert client.get(f"/api/documents/{document_id}").status_code == 404
     assert application.state.fake_dispatcher.purge_document_ids == [document_id]
     # Physical deletion belongs to the asynchronous purge task.
@@ -209,11 +221,11 @@ def test_soft_deleted_checksum_can_be_uploaded_again(
     workspace_id: str,
 ) -> None:
     first = upload_pdf(client, workspace_id)
-    client.delete(f"/api/documents/{first.json()['documentId']}")
+    client.delete(f"/api/documents/{first.json()['data']['documentId']}")
 
     second = upload_pdf(client, workspace_id)
     assert second.status_code == 201
-    assert second.json()["documentId"] != first.json()["documentId"]
+    assert second.json()["data"]["documentId"] != first.json()["data"]["documentId"]
 
 
 def test_missing_workspace_and_document_return_404(client: TestClient) -> None:

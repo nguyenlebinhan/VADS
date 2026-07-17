@@ -26,6 +26,10 @@ class ObjectStorage(Protocol):
 
     def delete(self, *, object_key: str) -> None: ...
 
+    def download(self, *, object_key: str) -> bytes: ...
+
+    def health_check(self) -> bool: ...
+
 
 class S3ObjectStorage:
     """S3 client configured for either AWS S3 or a MinIO endpoint."""
@@ -43,11 +47,7 @@ class S3ObjectStorage:
             region_name=settings.s3_region,
             config=Config(
                 signature_version="s3v4",
-                s3={
-                    "addressing_style": (
-                        "path" if settings.s3_force_path_style else "virtual"
-                    )
-                },
+                s3={"addressing_style": ("path" if settings.s3_force_path_style else "virtual")},
             ),
         )
 
@@ -113,3 +113,20 @@ class S3ObjectStorage:
         except (BotoCoreError, ClientError) as exc:
             logger.exception("Object deletion failed", extra={"object_key": object_key})
             raise StorageUnavailableError() from exc
+
+    def download(self, *, object_key: str) -> bytes:
+        self._ensure_bucket()
+        try:
+            response = self.client.get_object(Bucket=self.bucket_name, Key=object_key)
+            return response["Body"].read()
+        except (BotoCoreError, ClientError, OSError) as exc:
+            logger.exception("Object download failed", extra={"object_key": object_key})
+            raise StorageUnavailableError() from exc
+
+    def health_check(self) -> bool:
+        try:
+            self._ensure_bucket()
+            self.client.head_bucket(Bucket=self.bucket_name)
+        except (BotoCoreError, ClientError, StorageUnavailableError):
+            return False
+        return True

@@ -63,9 +63,7 @@ class DocumentService(Service):
 
         validated = self.validator.validate(upload)
         try:
-            duplicate = self.repository.find_active_duplicate(
-                workspace_id, validated.checksum
-            )
+            duplicate = self.repository.find_active_duplicate(workspace_id, validated.checksum)
             if duplicate is not None:
                 self._raise_duplicate(duplicate)
 
@@ -73,8 +71,7 @@ class DocumentService(Service):
             stored_filename = f"{uuid4().hex}{validated.extension}"
             resolved_display_name = self._display_name(display_name, validated)
             object_key = (
-                f"workspaces/{workspace_id}/documents/{document_id}/original/"
-                f"{stored_filename}"
+                f"workspaces/{workspace_id}/documents/{document_id}/original/{stored_filename}"
             )
             self.storage.upload(
                 validated.file_object,
@@ -114,7 +111,9 @@ class DocumentService(Service):
                 job_type=JobType.DOCUMENT_PROCESSING,
                 status=ProcessingStatus.UPLOADED,
                 progress=0,
-                current_step=ProcessingStep.WAITING_FOR_PROCESSING,
+                current_step=ProcessingStep.VALIDATING_FILE,
+                attempt=1,
+                message="Tài liệu đang chờ xử lý",
             )
             self.session.add_all([document, document_file, job])
             try:
@@ -148,7 +147,7 @@ class DocumentService(Service):
                 workspace_id=workspace_id,
                 status=ProcessingStatus.UPLOADED,
                 progress=0,
-                current_step=ProcessingStep.WAITING_FOR_PROCESSING,
+                current_step=ProcessingStep.VALIDATING_FILE,
             )
         finally:
             validated.close()
@@ -169,6 +168,7 @@ class DocumentService(Service):
             progress=job.progress,
             current_step=job.current_step,
             total_pages=document.total_pages,
+            document_type=document.document_type,
             created_at=document.created_at,
             updated_at=document.updated_at,
         )
@@ -177,6 +177,49 @@ class DocumentService(Service):
         self._get_active(document_id)
         job = self.processing_service.get_latest(document_id)
         return self.processing_service.to_response(job)
+
+    def reprocess(self, document_id: str) -> DocumentUploadResponse:
+        document = self.repository.get_active(document_id, for_update=True)
+        if document is None:
+            raise NotFoundError("DOCUMENT", document_id)
+        latest = self.processing_repository.get_latest_for_document(document_id)
+        if latest is not None and latest.status in {
+            ProcessingStatus.UPLOADED,
+            ProcessingStatus.QUEUED,
+            ProcessingStatus.PROCESSING,
+        }:
+            raise ConflictError(
+                "DOCUMENT_ALREADY_PROCESSING",
+                "Tài liệu đang có một processing job chưa hoàn tất.",
+                {"jobId": latest.id},
+            )
+        attempt = (latest.attempt if latest else 0) + 1
+        job = ProcessingJob(
+            document_id=document_id,
+            job_type=JobType.DOCUMENT_PROCESSING,
+            attempt=attempt,
+            status=ProcessingStatus.UPLOADED,
+            progress=0,
+            current_step=ProcessingStep.VALIDATING_FILE,
+            message="Tài liệu đang chờ xử lý lại",
+        )
+        document.status = ProcessingStatus.UPLOADED
+        self.session.add(job)
+        self.session.commit()
+        try:
+            self.dispatcher.enqueue_processing(job.id)
+        except Exception:
+            logger.exception(
+                "Could not dispatch reprocessing job",
+                extra={"job_id": job.id, "document_id": document_id},
+            )
+        return DocumentUploadResponse(
+            document_id=document_id,
+            workspace_id=document.workspace_id,
+            status=job.status,
+            progress=job.progress,
+            current_step=job.current_step,
+        )
 
     def soft_delete(self, document_id: str) -> DocumentDeleteResponse:
         document = self.repository.get_active(document_id, for_update=True)
@@ -189,6 +232,7 @@ class DocumentService(Service):
             ProcessingStatus.COMPLETED,
             ProcessingStatus.FAILED,
             ProcessingStatus.CANCELLED,
+            ProcessingStatus.NEEDS_REVIEW,
         }:
             self.processing_service.transition(
                 job.id,

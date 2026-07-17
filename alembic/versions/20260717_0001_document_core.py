@@ -252,9 +252,7 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["document_id"], ["documents.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "document_id", "job_type", name="uq_processing_job_document_type"
-        ),
+        sa.UniqueConstraint("document_id", "job_type", name="uq_processing_job_document_type"),
     )
     op.create_index("ix_processing_jobs_document_id", "processing_jobs", ["document_id"])
     op.create_index("ix_processing_jobs_status", "processing_jobs", ["status"])

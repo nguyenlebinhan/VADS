@@ -1,43 +1,52 @@
-# VADS Backend
+# VADS Document Pipeline
 
-Backend modular monolith cho VADS, hiện thực đầy đủ **Module 1 — Backend Core và
-Quản lý tài liệu**. API dùng FastAPI, SQLAlchemy 2, PostgreSQL, Celery/Redis và
-object storage tương thích S3 (MinIO mặc định).
+Backend Python 3.12 cho phần việc **Người 1** của VADS: tiếp nhận PDF/DOCX, lưu MinIO,
+xử lý nền qua Celery, trích xuất trang và OCR có chọn lọc, nhận diện cấu trúc pháp lý,
+tạo `DocumentChunk` và cung cấp read interface cho các module phía sau.
 
-## Chức năng đã có
+Repository này không triển khai summary AI, knowledge graph, red flag, embedding,
+reranking, chat Q&A hoặc frontend.
 
-- Tạo workspace.
-- Upload PDF/DOCX bằng `multipart/form-data`.
-- Kiểm tra extension, MIME khai báo, magic bytes/cấu trúc DOCX, tên file, file
-  rỗng và giới hạn dung lượng cấu hình được.
-- SHA-256 checksum và chặn file trùng trong cùng workspace.
-- Lưu file gốc vào MinIO/S3, metadata vào PostgreSQL và tạo processing job.
-- Poll metadata/trạng thái, phần trăm và bước xử lý.
-- State machine chống giảm tiến độ hoặc chuyển trạng thái không hợp lệ.
-- Soft delete; có thể bật xóa object bất đồng bộ theo chính sách.
-- Error JSON thống nhất và request ID.
+## Pipeline
 
-Các module extraction, summary, citation, knowledge graph và vector store mới có
-ranh giới package/schema để phát triển tiếp; chúng chưa tạo kết quả giả.
+```text
+Upload
+  -> validate extension / MIME / magic bytes / filename / size / SHA-256
+  -> upload original to MinIO
+  -> commit Document + DocumentFile + ProcessingJob
+  -> Celery worker
+       -> classify TEXT_BASED / SCANNED / HYBRID
+       -> render pages
+       -> extract text layer or OCR only the required pages
+       -> persist DocumentPage + PageBlock + DocumentTable
+       -> parse legal hierarchy with rules and regex
+       -> persist DocumentSection
+       -> create and persist DocumentChunk
+```
 
-## Chạy bằng Docker
+Luồng code tuân thủ `Router -> Service -> Repository -> Database/External service`.
+Business service chỉ biết `StorageProvider`; `MinioStorageProvider` là adapter S3 cụ thể.
+OCR chỉ đi qua `OcrProvider`. `DifficultPageReviewer` là extension point để orchestration
+kiểm tra trang khó, không thay OCR engine chính.
 
-Yêu cầu Docker và Docker Compose:
+## Chạy bằng Docker Compose
 
 ```bash
+cp .env.example .env
 docker compose up --build
 ```
 
-API docs: `http://localhost:8000/api/docs`  
-MinIO console: `http://localhost:9001`
+Các service:
 
-Compose tự chạy migration trước khi khởi động API. Worker chỉ tiếp nhận job và
-đưa trạng thái từ `UPLOADED` sang `QUEUED`; module extraction ở giai đoạn tiếp
-theo sẽ gọi `ProcessingStateService` để cập nhật các bước còn lại.
+- API và Alembic: `http://localhost:8000/api/docs`
+- PostgreSQL/pgvector: cổng `5432`
+- Redis/Celery: cổng `6379`
+- MinIO API/console: `9000`/`9001`
+
+`minio-init` tự tạo bucket được cấu hình bởi `VADS_S3_BUCKET_NAME`. Không commit `.env`;
+chỉ `.env.example` được quản lý trong Git.
 
 ## Chạy trực tiếp
-
-Python 3.12:
 
 ```bash
 python -m venv .venv
@@ -47,14 +56,31 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Chạy worker và bộ lập lịch ở hai terminal khác:
+Worker:
 
 ```bash
 celery -A app.config.celery_app:celery_app worker --loglevel=INFO
 celery -A app.config.celery_app:celery_app beat --loglevel=INFO
 ```
 
+Mặc định local dùng `VADS_OCR_PROVIDER=MOCK`. Để OCR scan thật, cài PaddleOCR runtime và
+đặt `VADS_OCR_PROVIDER=PADDLEOCR`. Không dùng vision LLM làm OCR engine chính.
+
 ## API
+
+```text
+POST   /api/workspaces
+POST   /api/workspaces/{workspaceId}/documents
+GET    /api/documents/{documentId}
+GET    /api/documents/{documentId}/status
+GET    /api/documents/{documentId}/pages
+GET    /api/documents/{documentId}/pages/{pageIndex}
+GET    /api/documents/{documentId}/sections
+GET    /api/documents/{documentId}/chunks
+GET    /api/documents/{documentId}/chunks/{chunkId}
+DELETE /api/documents/{documentId}
+POST   /api/documents/{documentId}/reprocess
+```
 
 Tạo workspace:
 
@@ -64,7 +90,7 @@ curl -X POST http://localhost:8000/api/workspaces \
   -d '{"name":"Phân tích dự thảo","description":"Phiên họp thẩm định"}'
 ```
 
-Upload PDF (thay `{workspaceId}` bằng ID vừa nhận):
+Upload:
 
 ```bash
 curl -X POST http://localhost:8000/api/workspaces/{workspaceId}/documents \
@@ -72,33 +98,60 @@ curl -X POST http://localhost:8000/api/workspaces/{workspaceId}/documents \
   -F "displayName=Dự thảo kế hoạch"
 ```
 
-Các endpoint còn lại:
-
-```text
-GET    /api/documents/{documentId}
-GET    /api/documents/{documentId}/status
-DELETE /api/documents/{documentId}
-```
-
-Lỗi luôn theo mẫu:
+Success response:
 
 ```json
 {
-  "error": {
-    "code": "DUPLICATE_DOCUMENT",
-    "message": "Tệp này đã tồn tại trong workspace.",
-    "requestId": "...",
-    "details": {"existingDocumentId": "doc-...", "checksum": "..."}
-  }
+  "success": true,
+  "data": {
+    "documentId": "c00e62d1-9eed-4b12-98d4-85fc34bccd38",
+    "status": "UPLOADED"
+  },
+  "message": "Operation completed successfully",
+  "timestamp": "2026-07-17T10:00:00Z"
 }
 ```
 
-## Kiểm thử
+Error response:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "DOCUMENT_NOT_FOUND",
+    "message": "Không tìm thấy tài liệu.",
+    "details": {}
+  },
+  "timestamp": "2026-07-17T10:00:00Z"
+}
+```
+
+## Interface dùng chung
+
+Import interface, không truy cập trực tiếp bảng chunk/section/page của module tài liệu:
+
+```python
+from app.documents.interfaces import DocumentChunkReader
+```
+
+Interface cung cấp:
+
+- `list_chunks(document_id)`
+- `get_chunk(chunk_id)`
+- `search_chunks_by_section(document_id, filters)`
+- `get_page_blocks(document_id, page_index)`
+- `get_document_structure(document_id)`
+
+## Test và kiểm tra chất lượng
 
 ```bash
 pytest
+ruff check app
+ruff format --check app
+alembic upgrade head
+docker compose config --quiet
 ```
 
-Test API dùng SQLite và object storage/dispatcher giả lập, nên không cần chạy
-PostgreSQL, Redis hoặc MinIO. Chi tiết quyết định kiến trúc nằm tại
-[`docs/architecture.md`](docs/architecture.md).
+Test dùng SQLite, object storage giả và dispatcher giả nên không cần PostgreSQL, Redis hay
+MinIO. Bộ test bao phủ upload/validation/compensation, PDF classification, OCR+bbox,
+structure hierarchy qua nhiều trang, chunk metadata, soft delete, reprocess và job failure.

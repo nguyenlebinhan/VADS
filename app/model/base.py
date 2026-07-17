@@ -23,7 +23,10 @@ def utcnow() -> datetime:
 
 
 def prefixed_uuid(prefix: str) -> Callable[[], str]:
-    return lambda: f"{prefix}-{uuid4()}"
+    """Build UUID identifiers while preserving the scaffold's import API."""
+
+    del prefix
+    return lambda: str(uuid4())
 
 
 class TimestampMixin:

@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -12,8 +13,8 @@ from app.exceptions.errors import AppError
 logger = logging.getLogger(__name__)
 
 
-def _request_id(request: Request) -> str | None:
-    return getattr(request.state, "request_id", None)
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _error_body(
@@ -23,14 +24,17 @@ def _error_body(
     message: str,
     details: Any | None = None,
 ) -> dict[str, Any]:
-    error: dict[str, Any] = {
-        "code": code,
-        "message": message,
-        "requestId": _request_id(request),
+    encoded_details = jsonable_encoder(details) if details is not None else {}
+    del request
+    return {
+        "success": False,
+        "error": {
+            "code": code,
+            "message": message,
+            "details": encoded_details,
+        },
+        "timestamp": _timestamp(),
     }
-    if details is not None:
-        error["details"] = jsonable_encoder(details)
-    return {"error": error}
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -86,4 +90,3 @@ def register_exception_handlers(app: FastAPI) -> None:
                 message="Đã xảy ra lỗi nội bộ.",
             ),
         )
-

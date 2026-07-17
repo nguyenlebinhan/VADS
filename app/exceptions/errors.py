@@ -19,10 +19,17 @@ class AppError(Exception):
 
 class NotFoundError(AppError):
     def __init__(self, resource: str, resource_id: str) -> None:
+        names = {
+            "WORKSPACE": "workspace",
+            "DOCUMENT": "tài liệu",
+            "DOCUMENT_PAGE": "trang tài liệu",
+            "PROCESSING_JOB": "processing job",
+            "CHUNK": "chunk",
+        }
         super().__init__(
             status_code=404,
             code=f"{resource.upper()}_NOT_FOUND",
-            message=f"Không tìm thấy {resource.lower()} được yêu cầu.",
+            message=f"Không tìm thấy {names.get(resource.upper(), resource.lower())}.",
             details={"id": resource_id},
         )
 
@@ -64,4 +71,3 @@ class InvalidStateTransitionError(AppError):
             message="Không thể chuyển trạng thái xử lý theo yêu cầu.",
             details={"currentStatus": current, "targetStatus": target},
         )
-

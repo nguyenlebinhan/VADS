@@ -37,6 +37,12 @@ class FakeObjectStorage:
     def delete(self, *, object_key: str) -> None:
         self.objects.pop(object_key, None)
 
+    def download(self, *, object_key: str) -> bytes:
+        return self.objects[object_key]
+
+    def health_check(self) -> bool:
+        return True
+
 
 class FakeTaskDispatcher:
     def __init__(self) -> None:
@@ -146,4 +152,4 @@ def workspace_id(client: TestClient) -> str:
         },
     )
     assert response.status_code == 201
-    return response.json()["id"]
+    return response.json()["data"]["id"]

@@ -11,17 +11,23 @@ class ProcessingStatusResponse(APIModel):
     status: ProcessingStatus
     progress: int = Field(ge=0, le=100)
     current_step: ProcessingStep
+    current_page: int | None = Field(default=None, ge=0)
+    total_pages: int | None = Field(default=None, ge=0)
     message: str
     started_at: datetime | None = None
     updated_at: datetime
     completed_at: datetime | None = None
     error_code: str | None = None
+    error_message: str | None = None
 
 
 class ProcessingUpdate(APIModel):
     status: ProcessingStatus
     progress: int = Field(ge=0, le=100)
     current_step: ProcessingStep
+    current_page: int | None = Field(default=None, ge=0)
+    total_pages: int | None = Field(default=None, ge=0)
+    message: str | None = Field(default=None, max_length=4000)
     error_code: str | None = Field(default=None, max_length=100)
     error_message: str | None = Field(default=None, max_length=4000)
 

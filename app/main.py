@@ -3,10 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import Settings, get_settings
 from app.controller.common import router as common_router
-from app.controller.documents import router as documents_router
-from app.controller.workspaces import router as workspaces_router
+from app.documents.router import router as documents_router
 from app.exceptions.handlers import register_exception_handlers
 from app.utils.middleware import RequestContextMiddleware
+from app.workspaces.router import router as workspaces_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

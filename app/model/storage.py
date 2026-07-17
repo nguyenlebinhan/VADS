@@ -20,9 +20,7 @@ class StorageProvider(str, Enum):
 class DocumentFile(Base):
     __tablename__ = "document_files"
 
-    id: Mapped[str] = mapped_column(
-        String(48), primary_key=True, default=prefixed_uuid("dfile")
-    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=prefixed_uuid("dfile"))
     document_id: Mapped[str] = mapped_column(
         String(40),
         ForeignKey("documents.id", ondelete="CASCADE"),

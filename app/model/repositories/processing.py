@@ -12,11 +12,7 @@ class ProcessingJobRepository(Repository[ProcessingJob]):
         super().__init__(session)
 
     def get_for_update(self, job_id: str) -> ProcessingJob | None:
-        statement = (
-            select(ProcessingJob)
-            .where(ProcessingJob.id == job_id)
-            .with_for_update()
-        )
+        statement = select(ProcessingJob).where(ProcessingJob.id == job_id).with_for_update()
         return self.session.scalar(statement)
 
     def get_latest_for_document(
@@ -31,7 +27,7 @@ class ProcessingJobRepository(Repository[ProcessingJob]):
                 ProcessingJob.document_id == document_id,
                 ProcessingJob.job_type == JobType.DOCUMENT_PROCESSING,
             )
-            .order_by(ProcessingJob.created_at.desc())
+            .order_by(ProcessingJob.attempt.desc(), ProcessingJob.created_at.desc())
             .limit(1)
         )
         if for_update:

@@ -10,9 +10,9 @@ class TaskDispatcher(Protocol):
 
 class CeleryTaskDispatcher:
     def enqueue_processing(self, job_id: str) -> None:
-        from app.service.processing_tasks import mark_queued
+        from app.service.processing_tasks import process_document
 
-        mark_queued.apply_async(args=[job_id])
+        process_document.apply_async(args=[job_id])
 
     def enqueue_purge(self, document_id: str) -> None:
         from app.service.processing_tasks import purge_document_objects

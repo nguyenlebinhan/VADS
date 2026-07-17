@@ -16,9 +16,7 @@ class UserStatus(str, Enum):
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
-    id: Mapped[str] = mapped_column(
-        String(40), primary_key=True, default=prefixed_uuid("usr")
-    )
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=prefixed_uuid("usr"))
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -35,4 +33,7 @@ class User(TimestampMixin, Base):
     )
 
     workspaces = relationship("Workspace", back_populates="owner")
+    workspace_memberships = relationship(
+        "WorkspaceMember", back_populates="user", cascade="all, delete-orphan"
+    )
     documents = relationship("Document", back_populates="uploader")

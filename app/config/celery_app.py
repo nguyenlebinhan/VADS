@@ -23,8 +23,10 @@ celery_app.conf.update(
     enable_utc=True,
     result_serializer="json",
     task_always_eager=settings.celery_task_always_eager,
+    task_acks_late=True,
     task_default_queue=settings.document_processing_queue,
     task_ignore_result=True,
+    worker_prefetch_multiplier=1,
     task_routes={
         "vads.processing.*": {"queue": settings.document_processing_queue},
     },
