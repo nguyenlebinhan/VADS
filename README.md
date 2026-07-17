@@ -155,3 +155,29 @@ docker compose config --quiet
 Test dùng SQLite, object storage giả và dispatcher giả nên không cần PostgreSQL, Redis hay
 MinIO. Bộ test bao phủ upload/validation/compensation, PDF classification, OCR+bbox,
 structure hierarchy qua nhiều trang, chunk metadata, soft delete, reprocess và job failure.
+
+## AI orchestration (Người 2)
+
+Tầng AI orchestration nhận `DocumentChunk` qua `DocumentChunkReader` và không phụ thuộc upload,
+OCR, parser, vector database hay retrieval. Implementation gồm model registry/gateway, DAG có
+retry và fallback, summary có citation, knowledge graph, red-flag rule engine, critical questions
+và model execution audit.
+
+Tài liệu vận hành, model routing và cách inject provider adapter nằm tại
+[`app/orchestrator/README.md`](app/orchestrator/README.md). Có thể chạy trực tiếp các request mẫu
+trong [`app/orchestrator/api_examples.http`](app/orchestrator/api_examples.http).
+
+Các API mới:
+
+```text
+POST /api/documents/{documentId}/analysis
+GET  /api/workflows/{workflowId}
+POST /api/documents/{documentId}/summaries/generate
+GET  /api/documents/{documentId}/summaries
+GET  /api/summaries/{summaryId}
+POST /api/documents/{documentId}/knowledge-graph/generate
+GET  /api/documents/{documentId}/knowledge-graph
+GET  /api/documents/{documentId}/red-flags
+POST /api/documents/{documentId}/critical-questions/generate
+GET  /api/documents/{documentId}/critical-questions
+```

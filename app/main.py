@@ -5,6 +5,7 @@ from app.config.settings import Settings, get_settings
 from app.controller.common import router as common_router
 from app.documents.router import router as documents_router
 from app.exceptions.handlers import register_exception_handlers
+from app.orchestrator.router import router as ai_orchestration_router
 from app.utils.middleware import RequestContextMiddleware
 from app.workspaces.router import router as workspaces_router
 
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(common_router)
     application.include_router(workspaces_router, prefix=app_settings.api_prefix)
     application.include_router(documents_router, prefix=app_settings.api_prefix)
+    application.include_router(ai_orchestration_router, prefix=app_settings.api_prefix)
     return application
 
 

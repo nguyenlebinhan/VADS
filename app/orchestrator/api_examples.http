@@ -1,0 +1,57 @@
+@baseUrl = http://localhost:8000/api
+@documentId = replace-document-id
+@workflowId = replace-workflow-id
+@summaryId = replace-summary-id
+
+### Chạy workflow phân tích đầy đủ
+POST {{baseUrl}}/documents/{{documentId}}/analysis
+Content-Type: application/json
+
+{
+  "privateProcessing": false
+}
+
+### Theo dõi plan, step results và model execution audit
+GET {{baseUrl}}/workflows/{{workflowId}}
+
+### Sinh summary version mới
+POST {{baseUrl}}/documents/{{documentId}}/summaries/generate
+Content-Type: application/json
+
+{
+  "privateProcessing": false
+}
+
+### Danh sách summary versions
+GET {{baseUrl}}/documents/{{documentId}}/summaries
+
+### Chi tiết summary và citations
+GET {{baseUrl}}/summaries/{{summaryId}}
+
+### Sinh knowledge graph; rule engine red flags chạy sau khi graph thành công
+POST {{baseUrl}}/documents/{{documentId}}/knowledge-graph/generate
+Content-Type: application/json
+
+{
+  "privateProcessing": false
+}
+
+### Graph hiện hành
+GET {{baseUrl}}/documents/{{documentId}}/knowledge-graph
+
+### Chỉ trả flag được phép phát hành
+GET {{baseUrl}}/documents/{{documentId}}/red-flags
+
+### Dùng cho audit nội bộ, bao gồm SUPPRESSED
+GET {{baseUrl}}/documents/{{documentId}}/red-flags?include_suppressed=true
+
+### Sinh tối đa 5 câu hỏi phản biện
+POST {{baseUrl}}/documents/{{documentId}}/critical-questions/generate
+Content-Type: application/json
+
+{
+  "privateProcessing": false
+}
+
+### Danh sách câu hỏi đã VERIFIED
+GET {{baseUrl}}/documents/{{documentId}}/critical-questions
