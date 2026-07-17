@@ -1,0 +1,1 @@
+"""Aggregation integration adapters."""
