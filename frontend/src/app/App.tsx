@@ -5,8 +5,8 @@ import UserPortal from "./UserPortal";
 import { authApi, type CurrentUser } from "../lib/api";
 
 function Login({ onSuccess }: { onSuccess: (user: CurrentUser) => void }) {
-  const [identifier, setIdentifier] = useState("user.test");
-  const [password, setPassword] = useState("UserTest123");
+  const [identifier, setIdentifier] = useState("user.demo");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: React.FormEvent) {

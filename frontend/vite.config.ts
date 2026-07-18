@@ -28,11 +28,6 @@ export default defineConfig({
   },
   build: {
     manifest: true,
-    rollupOptions: {
-      input: {
-        app: path.resolve(__dirname, 'src/main.tsx'),
-      },
-    },
   },
   plugins: [
     figmaAssetResolver(),

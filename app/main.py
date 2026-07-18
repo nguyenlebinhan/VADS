@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import router as secure_v1_router
 from app.api_aggregation.router import api_router as product_api_router
@@ -14,6 +17,8 @@ from app.user_context.router import router as user_context_router
 from app.utils.middleware import RequestContextMiddleware
 from app.utils.model_registry import import_models
 from app.workspaces.router import router as workspaces_router
+
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend-dist"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -50,6 +55,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.include_router(product_api_router, prefix=app_settings.api_prefix)
         application.include_router(regulatory_change_router, prefix=app_settings.api_prefix)
         application.include_router(user_context_router, prefix=app_settings.api_prefix)
+    if FRONTEND_DIST.is_dir():
+        application.mount(
+            "/",
+            StaticFiles(directory=FRONTEND_DIST, html=True),
+            name="frontend",
+        )
     return application
 
 

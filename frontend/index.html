@@ -1,90 +1,25 @@
-
-  <!DOCTYPE html>
-  <html lang="en">
-    <head>
-      
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>VADS - Prototype</title>
-      <meta name="description" content="Streamline legal and administrative document analysis with AI-driven insights, enhancing productivity for professionals in the legal sector." />
-      <meta name="robots" content="noindex, nofollow" />
-      <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
-      <script>
-        (function () {
-          function loadStylesheet(href) {
-            var link = document.createElement('link')
-            link.rel = 'stylesheet'
-            link.href = href
-            document.head.appendChild(link)
-          }
-
-          function loadModule(src) {
-            var script = document.createElement('script')
-            script.type = 'module'
-            script.src = src
-            document.head.appendChild(script)
-          }
-
-          function start() {
-            fetch('/src/main.tsx', { cache: 'no-store' })
-              .then(function (response) {
-                var contentType = response.headers.get('content-type') || ''
-
-                if (response.ok && contentType.indexOf('javascript') !== -1) {
-                  loadModule('/src/main.tsx')
-                  return
-                }
-
-                throw new Error('Static server detected')
-              })
-              .catch(function () {
-                fetch('/dist/.vite/manifest.json', { cache: 'no-store' })
-                  .then(function (response) {
-                    if (!response.ok) {
-                      throw new Error('Build output not found')
-                    }
-
-                    return response.json()
-                  })
-                  .then(function (manifest) {
-                    var entry = manifest['src/main.tsx'] || manifest['index.html'] || manifest.app || Object.values(manifest)[0]
-
-                    if (!entry || !entry.file) {
-                      throw new Error('Manifest entry missing')
-                    }
-
-                    if (entry.css) {
-                      entry.css.forEach(function (href) {
-                        loadStylesheet('/dist/' + href)
-                      })
-                    }
-
-                    loadModule('/dist/' + entry.file)
-                  })
-                  .catch(function () {
-                    document.body.innerHTML =
-                      '<div style="font-family: sans-serif; padding: 24px; line-height: 1.5">' +
-                      '<h1>Unable to load the app</h1>' +
-                      '<p>Use Vite dev server with <code>npm run dev</code> or build first with <code>npm run build</code> and open the generated <code>dist</code> output.</p>' +
-                      '</div>'
-                  })
-              })
-          }
-
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', start)
-          } else {
-            start()
-          }
-        })()
-      </script>
-      
-    </head>
-
-    <body>
-      
-      <div id="root"></div>
-      
-    </body>
-  </html>
-  
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VADS</title>
+    <meta
+      name="description"
+      content="Hệ thống phân tích văn bản hành chính và pháp lý ứng dụng AI."
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
