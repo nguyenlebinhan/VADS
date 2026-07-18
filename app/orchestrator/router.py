@@ -21,8 +21,7 @@ from app.orchestrator.dependencies import (
 )
 from app.orchestrator.planner import ExecutionPlanner
 from app.orchestrator.repository import WorkflowRepository
-from app.orchestrator.schemas import WorkflowView
-from app.orchestrator.service import DocumentAnalysisOrchestrator, DocumentAnalysisResult
+from app.orchestrator.schemas import WorkflowStatus, WorkflowView
 from app.red_flags.reader import SqlAlchemyRedFlagReader
 from app.red_flags.schemas import (
     CriticalQuestionGenerationResult,
@@ -36,12 +35,19 @@ from app.summaries.schemas import (
     SummaryGenerationResult,
 )
 from app.summaries.service import SummaryService
+from app.utils.task_dispatcher import TaskDispatcher, get_task_dispatcher
 
 router = APIRouter(tags=["AI Orchestration"])
 
 
 class GenerationRequest(APIModel):
     private_processing: bool = False
+
+
+class AnalysisAcceptedData(APIModel):
+    workflow_id: str
+    status: WorkflowStatus
+    status_url: str
 
 
 def _ensure_document(session: Session, document_id: str) -> Document:
@@ -57,30 +63,30 @@ def _request_gateway(gateway: ModelGateway, *, private: bool) -> ModelGateway:
 
 @router.post(
     "/documents/{document_id}/analysis",
-    response_model=ApiSuccessResponse[DocumentAnalysisResult],
-    status_code=status.HTTP_201_CREATED,
+    response_model=ApiSuccessResponse[AnalysisAcceptedData],
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def analyze_document(
     document_id: Annotated[str, Path(min_length=1)],
     session: Annotated[Session, Depends(get_db)],
-    gateway: Annotated[ModelGateway, Depends(get_model_gateway)],
     planner: Annotated[ExecutionPlanner, Depends(get_execution_planner)],
+    dispatcher: Annotated[TaskDispatcher, Depends(get_task_dispatcher)],
     body: GenerationRequest | None = None,
-) -> ApiSuccessResponse[DocumentAnalysisResult]:
+) -> ApiSuccessResponse[AnalysisAcceptedData]:
     _ensure_document(session, document_id)
     private = body.private_processing if body else False
-    chunk_reader = SqlAlchemyDocumentChunkReader(session)
-    result = DocumentAnalysisOrchestrator(
-        session,
-        gateway=_request_gateway(gateway, private=private),
-        planner=planner,
-        chunk_reader=chunk_reader,
-        citation_validator=build_citation_validator(session),
-    ).analyze(
-        document_id,
-        private=private,
+    plan = planner.analysis_plan(document_id, private=private)
+    WorkflowRepository(session).create(plan)
+    session.commit()
+    dispatcher.enqueue_analysis(plan.workflow_id)
+    return ApiSuccessResponse(
+        data=AnalysisAcceptedData(
+            workflowId=plan.workflow_id,
+            status=WorkflowStatus.PLANNED,
+            statusUrl=f"/api/workflows/{plan.workflow_id}",
+        ),
+        message="Document analysis workflow queued",
     )
-    return ApiSuccessResponse(data=result, message="Document analysis workflow executed")
 
 
 @router.get(

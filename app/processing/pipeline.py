@@ -100,7 +100,9 @@ class DocumentProcessingPipeline:
             )
 
         pages, blocks, tables = self._persist_extraction(document.id, extracted)
-        self.session.add_all([*pages, *tables])
+        self.session.add_all([*pages, *blocks])
+        self.session.flush()
+        self.session.add_all(tables)
         self.session.flush()
 
         total_pages = len(pages)

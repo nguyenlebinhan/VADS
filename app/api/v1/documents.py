@@ -1,17 +1,128 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Path, Query, Request, Response, UploadFile, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.database import get_db
+from app.config.settings import Settings, get_settings
 from app.core.audit import RequestMetadata
-from app.core.permissions import Permission
+from app.core.permissions import Permission, UserRole
 from app.database.async_session import get_async_db
 from app.dependencies.permissions import require_permission
+from app.exceptions import AuthorizationError, NotFoundError
+from app.model.documents import Document
+from app.model.workspaces import Workspace, WorkspaceStatus
 from app.model.users import User
-from app.schemas.document import DocumentPublic, document_to_public
+from app.schemas.document import DocumentPublic, DocumentUploadPublic, document_to_public
+from app.service.documents import DocumentService
 from app.services.document_service import SecureDocumentService
+from app.storage.provider import StorageProvider
+from app.utils.storage_dependencies import get_object_storage
+from app.utils.task_dispatcher import TaskDispatcher, get_task_dispatcher
 
 router = APIRouter(prefix="/documents", tags=["Secure documents"])
+
+
+def _personal_workspace(session: Session, actor: User) -> Workspace:
+    workspace = session.scalar(
+        select(Workspace)
+        .where(
+            Workspace.owner_id == actor.id,
+            Workspace.status == WorkspaceStatus.ACTIVE,
+            Workspace.deleted_at.is_(None),
+        )
+        .order_by(Workspace.created_at)
+        .limit(1)
+    )
+    if workspace is not None:
+        return workspace
+    workspace = Workspace(
+        name=f"Tai lieu cua {actor.full_name}",
+        owner_id=actor.id,
+    )
+    session.add(workspace)
+    session.commit()
+    session.refresh(workspace)
+    return workspace
+
+
+def _owned_document(session: Session, actor: User, document_id: str) -> Document:
+    document = session.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.owner_id == actor.id,
+            Document.is_deleted.is_(False),
+            Document.deleted_at.is_(None),
+        )
+    )
+    if document is None:
+        raise NotFoundError("DOCUMENT", document_id)
+    return document
+
+
+@router.post("", response_model=DocumentUploadPublic, status_code=status.HTTP_201_CREATED)
+def upload_document(
+    file: Annotated[UploadFile, File(description="PDF or DOCX document")],
+    actor: Annotated[User, Depends(require_permission(Permission.DOCUMENTS_CREATE))],
+    session: Annotated[Session, Depends(get_db)],
+    storage: Annotated[StorageProvider, Depends(get_object_storage)],
+    dispatcher: Annotated[TaskDispatcher, Depends(get_task_dispatcher)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> DocumentUploadPublic:
+    if actor.role == UserRole.USER and not settings.user_document_upload_enabled:
+        raise AuthorizationError(
+            code="DOCUMENT_UPLOAD_DISABLED",
+            message="Chuc nang tai tai lieu cua nguoi dung dang bi tat.",
+        )
+    workspace = _personal_workspace(session, actor)
+    result = DocumentService(
+        session,
+        storage=storage,
+        dispatcher=dispatcher,
+        settings=settings,
+    ).upload(
+        workspace.id,
+        file,
+        uploaded_by=actor.id,
+        commune_id=actor.commune_id,
+        owner_id=actor.id,
+    )
+    return DocumentUploadPublic(
+        document_id=result.document_id,
+        workspace_id=result.workspace_id,
+        status=result.status,
+        progress=result.progress,
+    )
+
+
+@router.post(
+    "/{document_id}/reprocess",
+    response_model=DocumentUploadPublic,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def reprocess_document(
+    document_id: Annotated[str, Path(min_length=1, max_length=40)],
+    actor: Annotated[User, Depends(require_permission(Permission.DOCUMENTS_CREATE))],
+    session: Annotated[Session, Depends(get_db)],
+    storage: Annotated[StorageProvider, Depends(get_object_storage)],
+    dispatcher: Annotated[TaskDispatcher, Depends(get_task_dispatcher)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> DocumentUploadPublic:
+    _owned_document(session, actor, document_id)
+    result = DocumentService(
+        session,
+        storage=storage,
+        dispatcher=dispatcher,
+        settings=settings,
+    ).reprocess(document_id)
+    return DocumentUploadPublic(
+        document_id=result.document_id,
+        workspace_id=result.workspace_id,
+        status=result.status,
+        progress=result.progress,
+    )
 
 
 @router.get("", response_model=list[DocumentPublic])

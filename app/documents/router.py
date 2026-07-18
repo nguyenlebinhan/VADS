@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Path, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.common.contracts import ApiSuccessResponse, DocumentChunkContract
@@ -123,9 +123,23 @@ def list_document_sections(
 def list_document_chunks(
     document_id: Annotated[str, Path(alias="documentId", min_length=1, max_length=40)],
     service: Annotated[DocumentQueryService, Depends(get_query_service)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(alias="pageSize", ge=1, le=100)] = 20,
 ) -> ApiSuccessResponse[DocumentChunksData]:
+    items, total_items = service.list_chunks(
+        document_id,
+        page=page,
+        page_size=page_size,
+    )
     return ApiSuccessResponse(
-        data=DocumentChunksData(document_id=document_id, items=service.list_chunks(document_id))
+        data=DocumentChunksData(
+            document_id=document_id,
+            items=items,
+            page=page,
+            page_size=page_size,
+            total_items=total_items,
+            total_pages=(total_items + page_size - 1) // page_size,
+        )
     )
 
 

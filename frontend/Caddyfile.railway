@@ -1,0 +1,10 @@
+:{$PORT:8080} {
+	encode zstd gzip
+
+	@backend path /api /api/* /health /health/*
+	reverse_proxy @backend {$VADS_API_UPSTREAM:api.railway.internal:8000}
+
+	root * /srv
+	try_files {path} /index.html
+	file_server
+}

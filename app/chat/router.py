@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Header, Path, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,7 @@ from app.streaming.sse import answer_event_stream
 from app.vector_store.adapters.mock.embedding import DeterministicEmbeddingProvider
 from app.vector_store.pgvector_store import PgVectorStore
 
-router = APIRouter(tags=["Meeting Q&A"])
+router = APIRouter(tags=["Document Q&A"])
 
 
 def get_chat_service(
@@ -86,27 +86,27 @@ def list_chat_messages(
 @router.post(
     "/chat/sessions/{sessionId}/messages",
     response_model=ApiSuccessResponse[ChatExchangeData],
+    responses={
+        200: {
+            "description": "JSON exchange or a server-sent event stream",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
 )
 def send_chat_message(
     session_id: Annotated[str, Path(alias="sessionId", min_length=1, max_length=40)],
     payload: ChatQuestionRequest,
     service: Annotated[ChatService, Depends(get_chat_service)],
-) -> ApiSuccessResponse[ChatExchangeData]:
-    return ApiSuccessResponse(data=service.ask(session_id, payload))
-
-
-@router.post("/chat/sessions/{sessionId}/messages/stream")
-def stream_chat_message(
-    session_id: Annotated[str, Path(alias="sessionId", min_length=1, max_length=40)],
-    payload: ChatQuestionRequest,
-    service: Annotated[ChatService, Depends(get_chat_service)],
-) -> StreamingResponse:
+    accept: Annotated[str | None, Header()] = None,
+) -> ApiSuccessResponse[ChatExchangeData] | StreamingResponse:
     exchange = service.ask(session_id, payload)
-    return StreamingResponse(
-        answer_event_stream(exchange.answer),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    if payload.stream or (accept and "text/event-stream" in accept.lower()):
+        return StreamingResponse(
+            answer_event_stream(exchange.answer),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return ApiSuccessResponse(data=exchange)
 
 
 @router.delete(

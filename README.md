@@ -17,7 +17,7 @@
 
 [Mã nguồn tích hợp](https://github.com/nguyenlebinhan/VADS) ·
 [Backend](https://github.com/nguyenlebinhan/VADS/tree/SU) ·
-[Frontend](https://github.com/nguyenlebinhan/VADS/tree/feature/frontend) ·
+[Frontend](https://github.com/nguyenlebinhan/VADS/tree/SU/frontend) ·
 [Figma Prototype](https://www.figma.com/design/b7Egr7gD623CWdrn6JdVpK/VADS---Prototype) ·
 [API Catalog](https://github.com/nguyenlebinhan/VADS/blob/main/docs/api-catalog.md)
 
@@ -203,7 +203,7 @@ qua HTTPS; business module không phụ thuộc SDK của nhà cung cấp.
 | Regulatory intelligence | Immutable versions, typed diff, timeline, impact, department actions, verification | Đã triển khai trên `main`; compatibility API cho demo local |
 | Retrieval & Q&A | pgvector store, hybrid retrieval, reranking, cited answer, SSE | Đã triển khai; embedding/reranker mặc định là adapter deterministic/lexical |
 | Security | Login, refresh rotation, logout, RBAC, tenant policy, soft delete, audit | Secure `/api/v1` bật mặc định |
-| Frontend | Login, hồ sơ, tài liệu, admin/user portal, document analysis UX | Secure core nối API thật; một số màn hình nâng cao dùng dữ liệu prototype |
+| Frontend | Login, hồ sơ, tài liệu, admin/user portal, document analysis UX | Secure core nối API thật; không chèn dữ liệu nghiệp vụ demo khi API rỗng hoặc lỗi |
 | Deployment | Docker Compose local; API/worker/beat/frontend tách service trên Railway | Cấu hình và runbook đã có trên `main` |
 
 ## Bảo mật và Responsible AI
@@ -352,6 +352,24 @@ Collection tự lưu các ID quan trọng từ response để có thể chạy t
 Danh mục đầy đủ, request shape và canonical route nằm tại
 [`docs/api-catalog.md`](https://github.com/nguyenlebinhan/VADS/blob/main/docs/api-catalog.md).
 
+### Upload và hỏi đáp RAG từ frontend
+
+Portal người dùng chỉ sử dụng API bảo mật và dữ liệu thuộc tenant hiện tại:
+
+```text
+POST /api/v1/documents
+GET  /api/v1/documents
+POST /api/v1/documents/{id}/reprocess
+DELETE /api/v1/documents/{id}
+POST /api/v1/rag/query
+```
+
+File gốc được lưu ở object storage; database lưu metadata, trạng thái xử lý và các chunk dùng cho
+retrieval. Đặt `VADS_USER_DOCUMENT_UPLOAD_ENABLED=true` để cho phép tài khoản USER tải tài liệu.
+Endpoint RAG cần `OPENAI_API_KEY` hoặc `VADS_OPENAI_API_KEY`; có thể đổi endpoint/model tương thích
+bằng `VADS_OPENAI_BASE_URL` và `VADS_OPENAI_CHAT_MODEL`. Khi API rỗng hoặc lỗi, frontend hiển thị
+đúng trạng thái đó và không thay thế bằng dữ liệu mẫu.
+
 ## Kiểm thử và chất lượng
 
 ### Backend
@@ -415,8 +433,8 @@ Nhóm chủ động ghi rõ ranh giới để kết quả demo không bị hiể
 - scanned PDF phải hoàn tất OCR trước khi semantic evidence extraction;
 - agent Regulatory Change đang chạy đồng bộ trong vertical slice; contract đã persist để chuyển
   sang Celery mà không đổi API;
-- frontend đã nối luồng bảo mật thật, trong khi một số màn hình nội dung nâng cao vẫn dùng dữ liệu
-  prototype.
+- frontend chỉ hiển thị dữ liệu từ secure API; các màn hình nâng cao chưa có endpoint tenant-scoped
+  được chủ động ẩn thay vì dùng dữ liệu prototype.
 
 Ưu tiên tiếp theo là hợp nhất toàn bộ product API vào policy tenant-scoped, kết nối embedding và
 nguồn pháp luật production, chuyển agent dispatch sang Celery, sau đó chạy PostgreSQL security,
@@ -438,7 +456,7 @@ load và recovery test trên staging.
 
 - **Repository chính:** <https://github.com/nguyenlebinhan/VADS>
 - **Nhánh backend:** <https://github.com/nguyenlebinhan/VADS/tree/SU>
-- **Nhánh frontend:** <https://github.com/nguyenlebinhan/VADS/tree/feature/frontend>
+- **Frontend đã tích hợp trên SU:** <https://github.com/nguyenlebinhan/VADS/tree/SU/frontend>
 - **Kiến trúc Regulatory Change:** [docs/regulatory-change-architecture.md](https://github.com/nguyenlebinhan/VADS/blob/main/docs/regulatory-change-architecture.md)
 - **Thiết kế authentication/authorization:** [docs/authentication-authorization.md](docs/authentication-authorization.md)
 - **AI orchestration:** [app/orchestrator/README.md](app/orchestrator/README.md)

@@ -107,7 +107,7 @@ xã khác.
 ## 5. Database schema
 
 Model nằm tại app/model/tenancy.py, app/model/users.py, app/model/security.py và
-app/model/documents.py. Migration là revision 20260718_0004.
+app/model/documents.py. Migration là revision 20260718_0006.
 
 - provinces: UUID, name/code unique, timestamps.
 - communes: FK province RESTRICT; code unique; unique province/name; index province.
@@ -239,7 +239,7 @@ get_all/get_by_id_without_scope.
 | Soft delete/restore | app/services/document_service.py |
 | Audit writer/redaction | record_audit |
 | Global exception handlers | app/exceptions/handlers.py |
-| Migration/constraint/trigger | revision 20260718_0004 |
+| Migration/constraint/trigger | revision 20260718_0006 |
 | Unit/integration tests | app/tests/security |
 
 Request schema dùng extra=forbid. Client thêm commune_id, owner_id, role hoặc created_by nhận

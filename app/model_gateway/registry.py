@@ -165,7 +165,7 @@ def build_default_registry() -> ModelRegistry:
             requiredCapabilities=required or {ModelCapability.STRUCTURED_OUTPUT},
             reason=reason,
             timeoutSeconds=timeout,
-            maxRetries=2,
+            maxRetries=1,
         )
 
     policies = [

@@ -48,12 +48,16 @@ class FakeTaskDispatcher:
     def __init__(self) -> None:
         self.processing_job_ids: list[str] = []
         self.purge_document_ids: list[str] = []
+        self.analysis_workflow_ids: list[str] = []
 
     def enqueue_processing(self, job_id: str) -> None:
         self.processing_job_ids.append(job_id)
 
     def enqueue_purge(self, document_id: str) -> None:
         self.purge_document_ids.append(document_id)
+
+    def enqueue_analysis(self, workflow_id: str) -> None:
+        self.analysis_workflow_ids.append(workflow_id)
 
 
 @pytest.fixture

@@ -10,8 +10,6 @@ from app.api_aggregation.models import (
     ChatSession,
     DocumentIndexJob,
     EmbeddingRecord,
-    MeetingSession,
-    TranscriptSegment,
 )
 from app.model.base import Base
 from app.utils.model_registry import import_models
@@ -21,8 +19,6 @@ OWNER3_TABLES = [
     DocumentIndexJob.__table__,
     ChatSession.__table__,
     ChatMessage.__table__,
-    MeetingSession.__table__,
-    TranscriptSegment.__table__,
 ]
 
 

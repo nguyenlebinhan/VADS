@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -94,6 +94,17 @@ class Settings(BaseSettings):
     fpt_ai_allow_private_data: bool = False
 
     cors_origins: list[str]
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_postgresql_driver(cls, value: object) -> object:
+        """Make Railway's standard DATABASE_URL use the installed psycopg driver."""
+
+        if isinstance(value, str):
+            for prefix in ("postgres://", "postgresql://"):
+                if value.startswith(prefix):
+                    return value.replace(prefix, "postgresql+psycopg://", 1)
+        return value
 
     @property
     def max_upload_size_bytes(self) -> int:

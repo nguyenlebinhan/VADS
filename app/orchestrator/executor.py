@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.model_audit.models import ModelExecution
 from app.model_audit.repository import ModelExecutionRepository
+from app.model_gateway.errors import ModelRateLimitError
 from app.model_gateway.schemas import TaskType
 from app.orchestrator.repository import WorkflowRepository
 from app.orchestrator.schemas import (
@@ -291,6 +292,17 @@ class WorkflowExecutor:
                             error_message=str(exc),
                         )
                     )
+                    if isinstance(exc, ModelRateLimitError):
+                        result = StepExecutionResult(
+                            stepId=step.step_id,
+                            taskType=step.task_type,
+                            executor=model_alias,
+                            status=StepStatus.FAILED,
+                            attempts=attempt_number,
+                            usedFallback=is_fallback,
+                            error=str(exc),
+                        )
+                        return _StepOutcome(result, traces, started_at, attempt_completed)
 
         completed_at = datetime.now(UTC)
         exhausted_status = (

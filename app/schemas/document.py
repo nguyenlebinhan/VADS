@@ -18,6 +18,13 @@ class DocumentPublic(StrictAPIModel):
     updated_at: datetime
 
 
+class DocumentUploadPublic(StrictAPIModel):
+    document_id: str
+    workspace_id: str
+    status: ProcessingStatus
+    progress: int
+
+
 def document_to_public(document: Document) -> DocumentPublic:
     return DocumentPublic(
         id=document.id,

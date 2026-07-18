@@ -6,9 +6,10 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+node_modules/
 .env
 dist/
 build/
+.cache/docx_rag/
 *.db
 *.sqlite3
-

@@ -26,7 +26,7 @@ from app.model.extraction import DocumentPage, PageBlock
 from app.model.processing import ProcessingStatus
 from app.model.workspaces import Workspace
 from app.model_audit.models import ModelExecution
-from app.model_gateway.errors import StructuredOutputError
+from app.model_gateway.errors import ModelRateLimitError, StructuredOutputError
 from app.model_gateway.gateway import CallableModelGateway
 from app.model_gateway.registry import build_default_registry
 from app.model_gateway.router import ModelRouter
@@ -40,6 +40,7 @@ from app.orchestrator.schemas import (
     StepStatus,
     WorkflowIntent,
 )
+from app.orchestrator.service import DocumentAnalysisOrchestrator
 from app.red_flags.rules import RedFlagRuleEngine
 from app.red_flags.schemas import (
     CriticalQuestionOutput,
@@ -196,6 +197,42 @@ def test_one_fallback_after_retries(session_factory: sessionmaker[Session]) -> N
         )
         assert calls == ["primary", "primary", "primary", "fallback"]
         assert result.steps[0].used_fallback is True
+
+
+def test_rate_limit_fails_without_retry_or_fallback(
+    session_factory: sessionmaker[Session],
+) -> None:
+    calls: list[str] = []
+
+    def handler(step: ExecutionStep, model: str, dependencies: dict[str, Any]):
+        del step, dependencies
+        calls.append(model)
+        raise ModelRateLimitError(model)
+
+    with session_factory() as session:
+        result = WorkflowExecutor(session).execute(
+            plan(fallback="fallback"),
+            {TaskType.DOCUMENT_SUMMARY: handler},
+        )
+
+    assert calls == ["primary"]
+    assert result.steps[0].attempts == 1
+    assert result.steps[0].status == StepStatus.FAILED
+
+
+def test_analysis_batches_chunks_by_count_and_token_budget() -> None:
+    chunks = [chunk(chunk_id=f"chunk-{index}") for index in range(25)]
+    batches = DocumentAnalysisOrchestrator._chunk_batches(chunks)
+
+    assert [len(batch) for batch in batches] == [12, 12, 1]
+
+
+def test_ai_prompt_payload_omits_bounding_boxes() -> None:
+    summary_prompt = SummaryService._summary_prompt("doc-a", [chunk()], "test")
+    graph_payload = KnowledgeGraphService._chunks_payload([chunk()])
+
+    assert "boundingBoxes" not in summary_prompt
+    assert "boundingBoxes" not in graph_payload[0]
 
 
 def test_structured_output_validation_rejects_invalid_json() -> None:

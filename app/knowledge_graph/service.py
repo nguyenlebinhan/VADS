@@ -247,7 +247,6 @@ class KnowledgeGraphService:
                 "point": chunk.point,
                 "pageStart": chunk.pdf_page_start,
                 "pageEnd": chunk.pdf_page_end,
-                "boundingBoxes": chunk.bounding_boxes,
                 "sourceConfidence": chunk.ocr_confidence,
             }
             for chunk in chunks

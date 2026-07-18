@@ -8,7 +8,7 @@ celery_app = Celery(
     "vads",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.service.processing_tasks"],
+    include=["app.service.processing_tasks", "app.orchestrator.tasks"],
 )
 
 celery_app.conf.update(
@@ -29,6 +29,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_routes={
         "vads.processing.*": {"queue": settings.document_processing_queue},
+        "vads.analysis.*": {"queue": settings.document_processing_queue},
     },
     task_serializer="json",
     timezone="UTC",
