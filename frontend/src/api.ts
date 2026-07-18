@@ -299,6 +299,12 @@ export function reprocessDocument(documentId: string): Promise<DocumentUploadRes
   });
 }
 
+export function deleteDocument(documentId: string): Promise<void> {
+  return request<void>(`/documents/${encodeURIComponent(documentId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export function queryDocumentRag(
   question: string,
   documentIds: string[],

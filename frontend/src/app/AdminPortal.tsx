@@ -93,11 +93,11 @@ function CreateUserScreen({ onCreated }: { onCreated: (user: UserPublic) => void
         <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Thông tin tài khoản</p>
       </div>
       <div className="grid grid-cols-1 gap-5 p-6 md:grid-cols-2">
-        <Field label="Tên đăng nhập" value={form.username} onChange={set("username")} placeholder="nguyenvana" autoComplete="off" />
-        <Field label="Email" value={form.email} onChange={set("email")} type="email" placeholder="user@example.com" autoComplete="off" />
-        <div className="md:col-span-2"><Field label="Họ và tên" value={form.fullName} onChange={set("fullName")} placeholder="Nguyễn Văn A" /></div>
-        <Field label="Chức vụ" value={form.position} onChange={set("position")} placeholder="Chuyên viên" />
-        <Field label="Phòng ban" value={form.department} onChange={set("department")} placeholder="Phòng Pháp chế" />
+        <Field label='Tên đăng nhập' value={form.username} onChange={set('username')} placeholder='Nhập tên đăng nhập' autoComplete='off' />
+        <Field label='Email' value={form.email} onChange={set('email')} type='email' placeholder='Nhập email' autoComplete='off' />
+        <div className='md:col-span-2'><Field label='Họ và tên' value={form.fullName} onChange={set('fullName')} placeholder='Nhập họ và tên' /></div>
+        <Field label='Chức vụ' value={form.position} onChange={set('position')} placeholder='Nhập chức vụ' />
+        <Field label='Phòng ban' value={form.department} onChange={set('department')} placeholder='Nhập phòng ban' />
         <div className="relative"><Field label="Mật khẩu tạm thời" value={form.password}
           onChange={set("password")} type={showPassword ? "text" : "password"} autoComplete="new-password" />
           <button type="button" onClick={() => setShowPassword((value) => !value)}

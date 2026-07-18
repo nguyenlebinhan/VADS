@@ -10,7 +10,3 @@ htmlcov
 **/node_modules
 **/dist
 **/build
-controller
-model
-service
-utils
