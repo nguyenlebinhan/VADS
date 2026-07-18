@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, FileText, Scale, BookMarked,
   Upload, Search, ChevronDown, X, AlertTriangle,
@@ -14,6 +15,103 @@ import {
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
 type Screen = "login" | "dashboard" | "documents" | "library" | "notebook" | "processing" | "tree";
+
+const PATH_BY_SCREEN: Record<Screen, string> = {
+  login: "/login",
+  dashboard: "/dashboard",
+  documents: "/documents",
+  library: "/library",
+  notebook: "/notebook",
+  processing: "/processing",
+  tree: "/tree",
+};
+
+interface AppRoute {
+  screen: Screen | null;
+  libraryLawSlug: string | null;
+  libraryChapterSlug: string | null;
+  documentSlug: string | null;
+  analysisSlug: string | null;
+  notebookTermSlug: string | null;
+}
+
+function normalizePath(pathname: string): string {
+  if (!pathname) return "/";
+  return pathname.endsWith("/") && pathname !== "/" ? pathname.slice(0, -1) : pathname;
+}
+
+function routeFromPath(pathname: string): AppRoute {
+  const normalized = normalizePath(pathname);
+  const libraryMatch = normalized.match(/^\/library\/([^/]+)(?:\/chuong\/([^/]+))?$/);
+  if (libraryMatch) {
+    return {
+      screen: "library",
+      libraryLawSlug: decodeURIComponent(libraryMatch[1]),
+      libraryChapterSlug: libraryMatch[2] ? decodeURIComponent(libraryMatch[2]) : null,
+      documentSlug: null,
+      analysisSlug: null,
+      notebookTermSlug: null,
+    };
+  }
+
+  const documentMatch = normalized.match(/^\/documents\/([^/]+)$/);
+  if (documentMatch) {
+    return {
+      screen: "documents",
+      libraryLawSlug: null,
+      libraryChapterSlug: null,
+      documentSlug: decodeURIComponent(documentMatch[1]),
+      analysisSlug: null,
+      notebookTermSlug: null,
+    };
+  }
+
+  const notebookTermMatch = normalized.match(/^\/notebook\/term\/([^/]+)$/);
+  if (notebookTermMatch) {
+    return {
+      screen: "notebook",
+      libraryLawSlug: null,
+      libraryChapterSlug: null,
+      documentSlug: null,
+      analysisSlug: null,
+      notebookTermSlug: decodeURIComponent(notebookTermMatch[1]),
+    };
+  }
+
+  const processingMatch = normalized.match(/^\/processing(?:\/([^/]+))?$/);
+  if (processingMatch) {
+    return {
+      screen: "processing",
+      libraryLawSlug: null,
+      libraryChapterSlug: null,
+      documentSlug: null,
+      analysisSlug: processingMatch[1] ? decodeURIComponent(processingMatch[1]) : null,
+      notebookTermSlug: null,
+    };
+  }
+
+  const treeMatch = normalized.match(/^\/tree(?:\/([^/]+))?$/);
+  if (treeMatch) {
+    return {
+      screen: "tree",
+      libraryLawSlug: null,
+      libraryChapterSlug: null,
+      documentSlug: null,
+      analysisSlug: treeMatch[1] ? decodeURIComponent(treeMatch[1]) : null,
+      notebookTermSlug: null,
+    };
+  }
+
+  const screen = Object.entries(PATH_BY_SCREEN).find(([, path]) => path === normalized);
+  return {
+    screen: (screen?.[0] as Screen | undefined) ?? null,
+    libraryLawSlug: null,
+    libraryChapterSlug: null,
+    documentSlug: null,
+    analysisSlug: null,
+    notebookTermSlug: null,
+  };
+}
 
 interface DocNode {
   id: string;
@@ -45,6 +143,8 @@ const MY_DOCUMENTS = [
   { id: 6, name: "Thông tư liên tịch 12/2024/TTLT-BTP-BNV về đăng ký hộ tịch", date: "28/08/2025", month: "Tháng 8", year: 2025, type: "Thông tư" },
 ];
 
+type DocumentItem = (typeof MY_DOCUMENTS)[number];
+
 const LEGAL_LIBRARY = [
   { id: 1, name: "Bộ luật Dân sự 2015", category: "Dân sự", status: "Còn hiệu lực", year: 2015, issuer: "Quốc hội", number: "91/2015/QH13" },
   { id: 2, name: "Luật Doanh nghiệp 2020", category: "Kinh doanh", status: "Còn hiệu lực", year: 2020, issuer: "Quốc hội", number: "59/2020/QH14" },
@@ -55,6 +155,53 @@ const LEGAL_LIBRARY = [
   { id: 7, name: "Nghị định 40/2024/NĐ-CP về đầu tư nước ngoài", category: "Đầu tư", status: "Còn hiệu lực", year: 2024, issuer: "Chính phủ", number: "40/2024/NĐ-CP" },
   { id: 8, name: "Luật Ngân sách nhà nước 2015", category: "Tài chính", status: "Còn hiệu lực", year: 2015, issuer: "Quốc hội", number: "83/2015/QH13" },
 ];
+
+type Law = (typeof LEGAL_LIBRARY)[number];
+
+function slugify(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function lawSlug(law: Law): string {
+  return `${slugify(law.name)}-${law.id}`;
+}
+
+function lawFromSlug(slug: string): Law | null {
+  const idMatch = slug.match(/-(\d+)$/);
+  if (idMatch) {
+    const id = Number(idMatch[1]);
+    const foundById = LEGAL_LIBRARY.find((law) => law.id === id);
+    if (foundById) return foundById;
+  }
+
+  const foundByName = LEGAL_LIBRARY.find((law) => slugify(law.name) === slug);
+  return foundByName ?? null;
+}
+
+function chapterSlug(chapterTitle: string, chapterIndex: number): string {
+  return `${chapterIndex + 1}-${slugify(chapterTitle)}`;
+}
+
+function documentSlug(doc: DocumentItem): string {
+  return `${slugify(doc.name)}-${doc.id}`;
+}
+
+function documentFromSlug(slug: string): DocumentItem | null {
+  const idMatch = slug.match(/-(\d+)$/);
+  if (idMatch) {
+    const id = Number(idMatch[1]);
+    const foundById = MY_DOCUMENTS.find((doc) => doc.id === id);
+    if (foundById) return foundById;
+  }
+
+  const foundByName = MY_DOCUMENTS.find((doc) => slugify(doc.name) === slug);
+  return foundByName ?? null;
+}
 
 const LAW_DETAILS: Record<number, { description: string; chapters: { title: string; summary: string }[]; relatedIds: number[]; keywords: string[] }> = {
   1: {
@@ -158,6 +305,24 @@ const KNOWLEDGE_TERMS = [
   { id: 6, term: "Đấu thầu rộng rãi", definition: "Hình thức lựa chọn nhà thầu trong đó không hạn chế số lượng nhà thầu tham dự, đảm bảo cạnh tranh và minh bạch tối đa.", source: "NĐ 15/2021/NĐ-CP", category: "Đấu thầu", highlightTerm: "nhà thầu" },
   { id: 7, term: "Cấp phép xây dựng", definition: "Văn bản pháp lý do cơ quan nhà nước có thẩm quyền cấp cho chủ đầu tư để xây dựng mới, sửa chữa, cải tạo công trình.", source: "NĐ 15/2021/NĐ-CP", category: "Xây dựng", highlightTerm: "nghiệm thu" },
 ];
+
+type KnowledgeTerm = (typeof KNOWLEDGE_TERMS)[number];
+
+function notebookTermSlug(term: KnowledgeTerm): string {
+  return `${slugify(term.term)}-${term.id}`;
+}
+
+function notebookTermFromSlug(slug: string): KnowledgeTerm | null {
+  const idMatch = slug.match(/-(\d+)$/);
+  if (idMatch) {
+    const id = Number(idMatch[1]);
+    const foundById = KNOWLEDGE_TERMS.find((term) => term.id === id);
+    if (foundById) return foundById;
+  }
+
+  const foundByTerm = KNOWLEDGE_TERMS.find((term) => slugify(term.term) === slug);
+  return foundByTerm ?? null;
+}
 
 const TREE_DATA: DocNode = {
   id: "root",
@@ -684,14 +849,16 @@ function LawFullTextModal({ law, onClose }: { law: typeof LEGAL_LIBRARY[0]; onCl
 
 // ─── LAW DETAIL VIEW ──────────────────────────────────────────────────────────
 
-function LawDetailView({ law, onBack, onSelectLaw, onGoToTree }: {
-  law: typeof LEGAL_LIBRARY[0];
+function LawDetailView({ law, selectedChapterSlug, onBack, onSelectLaw, onSelectChapter, onGoToTree }: {
+  law: Law;
+  selectedChapterSlug: string | null;
   onBack: () => void;
-  onSelectLaw: (l: typeof LEGAL_LIBRARY[0]) => void;
+  onSelectLaw: (l: Law) => void;
+  onSelectChapter: (law: Law, chapterIndex: number) => void;
   onGoToTree: () => void;
 }) {
   const detail = LAW_DETAILS[law.id];
-  const relatedLaws = (detail?.relatedIds ?? []).map(id => LEGAL_LIBRARY.find(l => l.id === id)).filter((l): l is typeof LEGAL_LIBRARY[0] => !!l);
+  const relatedLaws = (detail?.relatedIds ?? []).map(id => LEGAL_LIBRARY.find(l => l.id === id)).filter((l): l is Law => !!l);
   const [showFullText, setShowFullText] = useState(false);
 
   return (
@@ -745,8 +912,16 @@ function LawDetailView({ law, onBack, onSelectLaw, onGoToTree }: {
             <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Cấu trúc văn bản</h3>
             <div className="space-y-2.5">
               {detail?.chapters.map((ch, i) => (
-                <div key={i} className="flex items-start gap-3 p-3.5 bg-gray-50 rounded-xl hover:bg-gray-100 cursor-pointer transition-colors group">
-                  <div className="w-6 h-6 bg-[#0F1623] group-hover:bg-[#C41E3A] rounded-md flex items-center justify-center flex-shrink-0 text-[10px] text-white font-bold transition-colors">{i + 1}</div>
+                <div
+                  key={i}
+                  onClick={() => onSelectChapter(law, i)}
+                  className={`flex items-start gap-3 p-3.5 rounded-xl cursor-pointer transition-colors group ${
+                    selectedChapterSlug === chapterSlug(ch.title, i) ? "bg-[#C41E3A]/8 border border-[#C41E3A]/25" : "bg-gray-50 hover:bg-gray-100"
+                  }`}
+                >
+                  <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[10px] text-white font-bold transition-colors ${
+                    selectedChapterSlug === chapterSlug(ch.title, i) ? "bg-[#C41E3A]" : "bg-[#0F1623] group-hover:bg-[#C41E3A]"
+                  }`}>{i + 1}</div>
                   <div>
                     <p className="text-xs font-bold text-gray-800 mb-0.5">{ch.title}</p>
                     <p className="text-[11px] text-gray-500 leading-relaxed">{ch.summary}</p>
@@ -1447,10 +1622,71 @@ function DashboardScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) {
 
 // ─── MY DOCUMENTS ─────────────────────────────────────────────────────────────
 
-function MyDocumentsScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+function MyDocumentDetailView({
+  doc,
+  onBack,
+  onOpenAnalysis,
+}: {
+  doc: DocumentItem;
+  onBack: () => void;
+  onOpenAnalysis: (doc: DocumentItem) => void;
+}) {
+  return (
+    <div>
+      <button
+        onClick={onBack}
+        className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-800 transition-colors mb-5 group"
+      >
+        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+        Quay lại tài liệu của tôi
+      </button>
+
+      <div className="bg-white border border-black/[0.05] rounded-2xl p-6 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="w-11 h-11 bg-[#0F1623] rounded-xl flex items-center justify-center flex-shrink-0">
+            <FileText className="w-5 h-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-bold text-gray-900">{doc.name}</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {doc.type} · {doc.date} · {doc.month}/{doc.year}
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 flex items-center gap-3">
+          <button
+            onClick={() => onOpenAnalysis(doc)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#C41E3A] hover:bg-[#a8172f] text-white text-xs font-bold rounded-xl transition-colors shadow-sm"
+          >
+            <Brain className="w-3.5 h-3.5" />
+            Phân tích tài liệu
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MyDocumentsScreen({
+  selectedDocSlug,
+  onOpenDocument,
+  onCloseDocument,
+  onOpenAnalysis,
+}: {
+  selectedDocSlug: string | null;
+  onOpenDocument: (doc: DocumentItem) => void;
+  onCloseDocument: () => void;
+  onOpenAnalysis: (doc: DocumentItem) => void;
+}) {
   const [year, setYear] = useState("2025");
   const [open, setOpen] = useState(false);
+  const selectedDoc = selectedDocSlug ? documentFromSlug(selectedDocSlug) : null;
   const grouped = ["Tháng 7", "Tháng 8"].map(m => ({ month: m, docs: MY_DOCUMENTS.filter(d => d.month === m && d.year.toString() === year) }));
+
+  if (selectedDoc) {
+    return <MyDocumentDetailView doc={selectedDoc} onBack={onCloseDocument} onOpenAnalysis={onOpenAnalysis} />;
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -1483,7 +1719,7 @@ function MyDocumentsScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) 
             </div>
             <div className="grid grid-cols-3 gap-3 ml-5">
               {docs.map(doc => (
-                <div key={doc.id} onClick={() => onNavigate("processing")}
+                <div key={doc.id} onClick={() => onOpenDocument(doc)}
                   className="bg-white border border-black/[0.05] rounded-xl p-4 hover:shadow-md hover:border-[#C41E3A]/20 cursor-pointer transition-all group">
                   <div className="flex items-start gap-3">
                     <div className="w-9 h-9 bg-gray-50 group-hover:bg-[#C41E3A]/8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors">
@@ -1534,13 +1770,27 @@ function LibDropBtn({ label, value, opts, openKey, activeKey, onOpen, onChange }
   );
 }
 
-function LegalLibraryScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+function LegalLibraryScreen({
+  selectedLawSlug,
+  selectedChapterSlug,
+  onOpenLaw,
+  onCloseLaw,
+  onOpenChapter,
+  onOpenAnalysis,
+}: {
+  selectedLawSlug: string | null;
+  selectedChapterSlug: string | null;
+  onOpenLaw: (law: Law) => void;
+  onCloseLaw: () => void;
+  onOpenChapter: (law: Law, chapterIndex: number) => void;
+  onOpenAnalysis: (slug: string) => void;
+}) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Tất cả");
   const [status, setStatus] = useState("Tất cả");
   const [year, setYear] = useState("Tất cả");
   const [openDrop, setOpenDrop] = useState<string | null>(null);
-  const [selectedLaw, setSelectedLaw] = useState<typeof LEGAL_LIBRARY[0] | null>(null);
+  const selectedLaw = selectedLawSlug ? lawFromSlug(selectedLawSlug) : null;
 
   const cats = ["Tất cả", "Dân sự", "Kinh doanh", "Đấu thầu", "Xây dựng", "Tài chính", "Đầu tư"];
   const statuses = ["Tất cả", "Còn hiệu lực", "Hết hiệu lực"];
@@ -1557,9 +1807,11 @@ function LegalLibraryScreen({ onNavigate }: { onNavigate: (s: Screen) => void })
     return (
       <LawDetailView
         law={selectedLaw}
-        onBack={() => setSelectedLaw(null)}
-        onSelectLaw={setSelectedLaw}
-        onGoToTree={() => onNavigate("processing")}
+        selectedChapterSlug={selectedChapterSlug}
+        onBack={onCloseLaw}
+        onSelectLaw={onOpenLaw}
+        onSelectChapter={onOpenChapter}
+        onGoToTree={() => onOpenAnalysis(lawSlug(selectedLaw))}
       />
     );
   }
@@ -1589,7 +1841,7 @@ function LegalLibraryScreen({ onNavigate }: { onNavigate: (s: Screen) => void })
       <div className="grid grid-cols-2 gap-3">
         {filtered.map(doc => (
           <div key={doc.id}
-            onClick={e => { e.stopPropagation(); setSelectedLaw(doc); }}
+            onClick={e => { e.stopPropagation(); onOpenLaw(doc); }}
             className="bg-white border border-black/[0.05] rounded-xl p-5 hover:shadow-lg hover:border-[#C41E3A]/15 transition-all cursor-pointer group">
             <div className="flex items-start gap-3.5">
               <div className="w-10 h-10 bg-[#0F1623] group-hover:bg-[#C41E3A] rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm transition-colors duration-200">
@@ -1616,10 +1868,18 @@ function LegalLibraryScreen({ onNavigate }: { onNavigate: (s: Screen) => void })
 
 // ─── KNOWLEDGE NOTEBOOK ───────────────────────────────────────────────────────
 
-function KnowledgeNotebookScreen() {
+function KnowledgeNotebookScreen({
+  selectedTermSlug,
+  onOpenTerm,
+  onCloseTerm,
+}: {
+  selectedTermSlug: string | null;
+  onOpenTerm: (term: KnowledgeTerm) => void;
+  onCloseTerm: () => void;
+}) {
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState("Tất cả");
-  const [docViewerTerm, setDocViewerTerm] = useState<string | null>(null);
+  const selectedTerm = selectedTermSlug ? notebookTermFromSlug(selectedTermSlug) : null;
 
   const cats = ["Tất cả", "Xây dựng", "Tài chính", "Hành chính", "Đầu tư", "Đấu thầu"];
   const filtered = KNOWLEDGE_TERMS.filter(t =>
@@ -1670,7 +1930,7 @@ function KnowledgeNotebookScreen() {
               <p className="text-xs text-gray-600 leading-relaxed pr-5">{term.definition}</p>
               <div className="text-right">
                 <button
-                  onClick={() => setDocViewerTerm(term.highlightTerm)}
+                  onClick={() => onOpenTerm(term)}
                   className="text-[10px] px-2.5 py-1 bg-[#0F1623]/6 hover:bg-[#C41E3A] hover:text-white text-[#0F1623] rounded-full font-semibold whitespace-nowrap transition-all group/src"
                   title="Xem vị trí trong văn bản gốc">
                   {term.source}
@@ -1682,10 +1942,10 @@ function KnowledgeNotebookScreen() {
       </div>
 
       {/* DocumentViewerModal opened when clicking source */}
-      {docViewerTerm !== null && (
+      {selectedTerm !== null && (
         <DocumentViewerModal
-          onClose={() => setDocViewerTerm(null)}
-          initialTerm={docViewerTerm}
+          onClose={onCloseTerm}
+          initialTerm={selectedTerm.highlightTerm}
         />
       )}
     </>
@@ -2334,17 +2594,45 @@ const TITLES: Record<Screen, string> = {
 };
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("login");
   const [loggedIn, setLoggedIn] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importData, setImportData] = useState<ImportData | null>(null);
+  const location = useLocation();
+  const routerNavigate = useNavigate();
+  const route = routeFromPath(location.pathname);
+  const screen = route.screen;
 
-  const navigate = (s: Screen) => setScreen(s);
-  const handleImportSubmit = (data: ImportData) => { setImportData(data); setScreen("processing"); };
+  const navigate = (s: Screen) => routerNavigate(PATH_BY_SCREEN[s]);
+  const openAnalysis = (slug?: string) => routerNavigate(slug ? `${PATH_BY_SCREEN.processing}/${slug}` : PATH_BY_SCREEN.processing);
+  const openDocument = (doc: DocumentItem) => routerNavigate(`${PATH_BY_SCREEN.documents}/${documentSlug(doc)}`);
+  const closeDocument = () => routerNavigate(PATH_BY_SCREEN.documents);
+  const openNotebookTerm = (term: KnowledgeTerm) => routerNavigate(`${PATH_BY_SCREEN.notebook}/term/${notebookTermSlug(term)}`);
+  const closeNotebookTerm = () => routerNavigate(PATH_BY_SCREEN.notebook);
+  const openLaw = (law: Law) => routerNavigate(`${PATH_BY_SCREEN.library}/${lawSlug(law)}`);
+  const closeLaw = () => routerNavigate(PATH_BY_SCREEN.library);
+  const openLawChapter = (law: Law, chapterIndex: number) => {
+    const chapters = LAW_DETAILS[law.id]?.chapters ?? [];
+    const chapter = chapters[chapterIndex];
+    if (!chapter) {
+      openLaw(law);
+      return;
+    }
+    routerNavigate(`${PATH_BY_SCREEN.library}/${lawSlug(law)}/chuong/${chapterSlug(chapter.title, chapterIndex)}`);
+  };
+  const handleImportSubmit = (data: ImportData) => { setImportData(data); openAnalysis(); };
 
-  if (!loggedIn) return <LoginScreen onLogin={() => { setLoggedIn(true); setScreen("dashboard"); }} />;
+  if (!loggedIn) {
+    if (screen !== "login") return <Navigate to={PATH_BY_SCREEN.login} replace />;
+    return <LoginScreen onLogin={() => { setLoggedIn(true); navigate("dashboard"); }} />;
+  }
+
+  if (screen === null) return <Navigate to={PATH_BY_SCREEN.dashboard} replace />;
+  if (screen === "login") return <Navigate to={PATH_BY_SCREEN.dashboard} replace />;
+  if (screen === "library" && route.libraryLawSlug && !lawFromSlug(route.libraryLawSlug)) return <Navigate to={PATH_BY_SCREEN.library} replace />;
+  if (screen === "documents" && route.documentSlug && !documentFromSlug(route.documentSlug)) return <Navigate to={PATH_BY_SCREEN.documents} replace />;
+  if (screen === "notebook" && route.notebookTermSlug && !notebookTermFromSlug(route.notebookTermSlug)) return <Navigate to={PATH_BY_SCREEN.notebook} replace />;
 
   if (screen === "tree") return <WhiteboardScreen onNavigate={navigate} importData={importData} onProfile={() => setShowProfile(true)} onImport={() => setShowImport(true)} />;
 
@@ -2353,7 +2641,7 @@ export default function App() {
       <MainLayout active="dashboard" title="Đang xử lý tài liệu" onNavigate={navigate} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onProfile={() => setShowProfile(true)} onImport={() => setShowImport(true)}>
         <div className="h-96 flex items-center justify-center"><p className="text-gray-400 text-sm">Đang phân tích...</p></div>
       </MainLayout>
-      <ProcessingScreen onComplete={() => setScreen("tree")} />
+      <ProcessingScreen onComplete={() => routerNavigate(route.analysisSlug ? `${PATH_BY_SCREEN.tree}/${route.analysisSlug}` : PATH_BY_SCREEN.tree)} />
     </>
   );
 
@@ -2361,9 +2649,31 @@ export default function App() {
     <>
       <MainLayout active={screen} title={TITLES[screen]} onNavigate={navigate} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onProfile={() => setShowProfile(true)} onImport={() => setShowImport(true)}>
         {screen === "dashboard" && <DashboardScreen onNavigate={navigate} />}
-        {screen === "documents" && <MyDocumentsScreen onNavigate={navigate} />}
-        {screen === "library" && <LegalLibraryScreen onNavigate={navigate} />}
-        {screen === "notebook" && <KnowledgeNotebookScreen />}
+        {screen === "documents" && (
+          <MyDocumentsScreen
+            selectedDocSlug={route.documentSlug}
+            onOpenDocument={openDocument}
+            onCloseDocument={closeDocument}
+            onOpenAnalysis={(doc) => openAnalysis(documentSlug(doc))}
+          />
+        )}
+        {screen === "library" && (
+          <LegalLibraryScreen
+            selectedLawSlug={route.libraryLawSlug}
+            selectedChapterSlug={route.libraryChapterSlug}
+            onOpenLaw={openLaw}
+            onCloseLaw={closeLaw}
+            onOpenChapter={openLawChapter}
+            onOpenAnalysis={openAnalysis}
+          />
+        )}
+        {screen === "notebook" && (
+          <KnowledgeNotebookScreen
+            selectedTermSlug={route.notebookTermSlug}
+            onOpenTerm={openNotebookTerm}
+            onCloseTerm={closeNotebookTerm}
+          />
+        )}
       </MainLayout>
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
       {showImport && <ImportModal onClose={() => setShowImport(false)} onSubmit={handleImportSubmit} />}

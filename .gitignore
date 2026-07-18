@@ -9,6 +9,7 @@ htmlcov/
 .env
 dist/
 build/
+node_modules/
+**/node_modules/
 *.db
 *.sqlite3
-
