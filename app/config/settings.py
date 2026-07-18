@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     )
     login_max_failed_attempts: int = Field(default=5, ge=3, le=20)
     login_lock_minutes: int = Field(default=15, ge=1, le=1440)
-    user_document_upload_enabled: bool = False
+    user_document_upload_enabled: bool = True
     legacy_api_enabled: bool = False
 
     redis_url: str
