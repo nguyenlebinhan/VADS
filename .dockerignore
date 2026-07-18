@@ -7,8 +7,4 @@ __pycache__
 .ruff_cache
 .coverage
 htmlcov
-controller
-model
-service
-utils
 
