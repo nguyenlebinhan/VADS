@@ -1,7 +1,7 @@
 """Add tenant-scoped authentication and authorization data.
 
-Revision ID: 20260718_0004
-Revises: 20260718_0003
+Revision ID: 20260718_0006
+Revises: 20260718_0005
 """
 
 from collections.abc import Sequence
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "20260718_0004"
-down_revision: str | None = "20260718_0003"
+revision: str = "20260718_0006"
+down_revision: str | None = "20260718_0005"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

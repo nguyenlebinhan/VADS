@@ -21,8 +21,7 @@ COPY app ./app
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    python -m pip install --retries 20 --timeout 600 .
+RUN python -m pip install --retries 20 --timeout 600 .
 
 RUN if [ "$INSTALL_OCR" = "true" ]; then \
         apt-get update \
@@ -30,8 +29,7 @@ RUN if [ "$INSTALL_OCR" = "true" ]; then \
         && rm -rf /var/lib/apt/lists/*; \
     fi
 
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    if [ "$INSTALL_OCR" = "true" ]; then \
+RUN if [ "$INSTALL_OCR" = "true" ]; then \
         python -m pip install --retries 20 --timeout 600 paddlepaddle==3.2.0 \
             --index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
             --extra-index-url https://pypi.org/simple \
