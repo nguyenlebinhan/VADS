@@ -36,9 +36,15 @@ class DocumentQueryService:
         self._ensure_document(document_id)
         return self.reader.get_document_structure(document_id)
 
-    def list_chunks(self, document_id: str) -> list[DocumentChunkContract]:
+    def list_chunks(
+        self,
+        document_id: str,
+        *,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[DocumentChunkContract], int]:
         self._ensure_document(document_id)
-        return self.reader.list_chunks(document_id)
+        return self.reader.list_chunks_page(document_id, page=page, page_size=page_size)
 
     def get_chunk(self, document_id: str, chunk_id: str) -> DocumentChunkContract:
         self._ensure_document(document_id)

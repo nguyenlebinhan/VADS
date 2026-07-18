@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.model.chunking import DocumentChunk
@@ -17,6 +17,30 @@ class ChunkRepository:
             .order_by(DocumentChunk.order_index)
         )
         return list(self.session.scalars(statement))
+
+    def list_page(
+        self,
+        document_id: str,
+        *,
+        page: int,
+        page_size: int,
+    ) -> list[DocumentChunk]:
+        statement = (
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.order_index)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(self.session.scalars(statement))
+
+    def count_for_document(self, document_id: str) -> int:
+        statement = (
+            select(func.count())
+            .select_from(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+        )
+        return self.session.scalar(statement) or 0
 
     def get(self, chunk_id: str) -> DocumentChunk | None:
         return self.session.get(DocumentChunk, chunk_id)

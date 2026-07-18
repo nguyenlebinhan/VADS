@@ -9,7 +9,7 @@ import pytest
 from pydantic import SecretStr
 
 from app.chat.adapters.model_gateway import ModelGatewayChatAdapter
-from app.model_gateway.errors import ModelUnavailableError
+from app.model_gateway.errors import ModelRateLimitError, ModelUnavailableError
 from app.model_gateway.fpt_ai import FptAiGatewayConfig, FptAiModelGateway
 from app.model_gateway.gateway import MetadataModelGateway
 from app.model_gateway.registry import build_default_registry
@@ -145,6 +145,21 @@ def test_fpt_gateway_redacts_authentication_failure() -> None:
         adapter.generate_text(model_alias="GLM-5.2", prompt="test")
     assert "test-fpt-key" not in str(error.value)
     assert "authentication was rejected" in str(error.value)
+
+
+def test_fpt_gateway_exposes_rate_limit_as_non_retryable_error() -> None:
+    def reject(request: Request, *, timeout: int) -> FakeResponse:
+        del timeout
+        raise HTTPError(request.full_url, 429, "rate limited", {"Retry-After": "30"}, None)
+
+    adapter = FptAiModelGateway(
+        FptAiGatewayConfig(api_key=SecretStr("test-fpt-key")),
+        transport=reject,
+    )
+
+    with pytest.raises(ModelRateLimitError) as error:
+        adapter.generate_text(model_alias="GLM-5.2", prompt="test")
+    assert error.value.retry_after_seconds == 30
 
 
 def test_chat_adapter_uses_shared_fpt_gateway() -> None:

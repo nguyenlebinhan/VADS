@@ -10,7 +10,7 @@ from app.citations.repository import CitationRepository
 from app.citations.schemas import CitationOwnerType
 from app.citations.validator import CitationValidator
 from app.common.contracts import APIModel
-from app.documents.interfaces import DocumentChunkReader
+from app.documents.interfaces import DocumentChunkContract, DocumentChunkReader
 from app.knowledge_graph.reader import SqlAlchemyKnowledgeGraphReader
 from app.knowledge_graph.repository import KnowledgeGraphRepository
 from app.knowledge_graph.schemas import (
@@ -28,6 +28,7 @@ from app.orchestrator.executor import WorkflowExecutor
 from app.orchestrator.planner import ExecutionPlanner
 from app.orchestrator.repository import WorkflowRepository
 from app.orchestrator.schemas import (
+    ExecutionPlan,
     ExecutionStep,
     StepStatus,
     WorkflowExecutionResult,
@@ -54,6 +55,9 @@ from app.summaries.prompts import SUMMARY_PROMPT_VERSION
 from app.summaries.repository import SummaryRepository
 from app.summaries.schemas import DocumentSummaryOutput, SummaryStatus
 from app.summaries.service import SummaryService
+
+ANALYSIS_BATCH_MAX_CHUNKS = 12
+ANALYSIS_BATCH_MAX_TOKENS = 12_000
 
 
 class DocumentAnalysisResult(APIModel):
@@ -84,14 +88,22 @@ class DocumentAnalysisOrchestrator:
         self.chunk_reader = chunk_reader
         self.citation_validator = citation_validator
 
-    def analyze(self, document_id: str, *, private: bool = False) -> DocumentAnalysisResult:
+    def analyze(
+        self,
+        document_id: str,
+        *,
+        private: bool = False,
+        plan: ExecutionPlan | None = None,
+    ) -> DocumentAnalysisResult:
         chunks = self.chunk_reader.list_chunks(document_id)
+        chunk_batches = self._chunk_batches(chunks)
         snapshot = SnapshotDocumentChunkReader(chunks)
         validator = CitationValidator(
             snapshot,
             document_exists=lambda candidate: candidate == document_id,
         )
-        plan = self.planner.analysis_plan(document_id, private=private)
+        persist_plan = plan is None
+        plan = plan or self.planner.analysis_plan(document_id, private=private)
         summary_helper = SummaryService(
             self.session,
             gateway=self.gateway,
@@ -117,35 +129,72 @@ class DocumentAnalysisOrchestrator:
 
         def summary_handler(step: ExecutionStep, model: str, dependencies: dict[str, Any]):
             del dependencies
-            output = self.gateway.generate_structured(
-                model_alias=model,
-                prompt=summary_helper._summary_prompt(
-                    document_id,
-                    chunks,
-                    SUMMARY_PROMPT_VERSION,
-                ),
-                output_schema=DocumentSummaryOutput,
-                timeout_seconds=step.timeout_seconds,
-                metadata={"workflowId": plan.workflow_id, "stepId": step.step_id},
-            )
-            return summary_helper._validate_and_repair(
-                output,
-                document_id=document_id,
-                chunks=chunks,
-                model_alias=model,
-                timeout_seconds=step.timeout_seconds,
-                workflow_id=plan.workflow_id,
-            )
+            items = []
+            rejected = []
+            for batch_index, batch in enumerate(chunk_batches):
+                output = self.gateway.generate_structured(
+                    model_alias=model,
+                    prompt=summary_helper._summary_prompt(
+                        document_id,
+                        batch,
+                        SUMMARY_PROMPT_VERSION,
+                    ),
+                    output_schema=DocumentSummaryOutput,
+                    timeout_seconds=step.timeout_seconds,
+                    metadata={
+                        "workflowId": plan.workflow_id,
+                        "stepId": step.step_id,
+                        "batchIndex": batch_index,
+                        "batchCount": len(chunk_batches),
+                    },
+                )
+                validated = summary_helper._validate_and_repair(
+                    output,
+                    document_id=document_id,
+                    chunks=batch,
+                    model_alias=model,
+                    timeout_seconds=step.timeout_seconds,
+                    workflow_id=plan.workflow_id,
+                )
+                items.extend(validated.items)
+                rejected.extend(validated.rejected_items)
+            return DocumentSummaryOutput(items=items, rejectedItems=rejected)
 
         def extract_handler(step: ExecutionStep, model: str, dependencies: dict[str, Any]):
             del dependencies
-            return self.gateway.generate_structured(
-                model_alias=model,
-                prompt=graph_helper._extraction_prompt(document_id, chunks),
-                output_schema=GraphExtractionOutput,
-                timeout_seconds=step.timeout_seconds,
-                metadata={"workflowId": plan.workflow_id, "stepId": step.step_id},
-            )
+            nodes = []
+            edges = []
+            for batch_index, batch in enumerate(chunk_batches):
+                extracted = self.gateway.generate_structured(
+                    model_alias=model,
+                    prompt=graph_helper._extraction_prompt(document_id, batch),
+                    output_schema=GraphExtractionOutput,
+                    timeout_seconds=step.timeout_seconds,
+                    metadata={
+                        "workflowId": plan.workflow_id,
+                        "stepId": step.step_id,
+                        "batchIndex": batch_index,
+                        "batchCount": len(chunk_batches),
+                    },
+                )
+                prefix = f"b{batch_index}-"
+                node_ids = {node.node_id: f"{prefix}{node.node_id}" for node in extracted.nodes}
+                nodes.extend(
+                    node.model_copy(update={"node_id": node_ids[node.node_id]})
+                    for node in extracted.nodes
+                )
+                edges.extend(
+                    edge.model_copy(
+                        update={
+                            "edge_id": f"{prefix}{edge.edge_id}",
+                            "source_node_id": node_ids[edge.source_node_id],
+                            "target_node_id": node_ids[edge.target_node_id],
+                        }
+                    )
+                    for edge in extracted.edges
+                    if edge.source_node_id in node_ids and edge.target_node_id in node_ids
+                )
+            return GraphExtractionOutput(nodes=nodes, edges=edges)
 
         def normalize_handler(step: ExecutionStep, model: str, dependencies: dict[str, Any]):
             extracted = GraphExtractionOutput.model_validate(
@@ -169,7 +218,11 @@ class DocumentAnalysisOrchestrator:
                 return graph
             decisions = self.gateway.generate_structured(
                 model_alias=model,
-                prompt=graph_helper._verification_prompt(graph, complex_edges, chunks),
+                prompt=graph_helper._verification_prompt(
+                    graph,
+                    complex_edges,
+                    self._evidence_chunks(chunks, complex_edges),
+                ),
                 output_schema=RelationVerificationOutput,
                 timeout_seconds=step.timeout_seconds,
                 metadata={"workflowId": plan.workflow_id, "stepId": step.step_id},
@@ -268,7 +321,10 @@ class DocumentAnalysisOrchestrator:
                 return CriticalQuestionOutput(questions=[])
             generated = self.gateway.generate_structured(
                 model_alias=model,
-                prompt=question_helper._generation_prompt(public_flags, chunks),
+                prompt=question_helper._generation_prompt(
+                    public_flags,
+                    self._evidence_chunks(chunks, public_flags),
+                ),
                 output_schema=CriticalQuestionOutput,
                 timeout_seconds=step.timeout_seconds,
                 metadata={"workflowId": plan.workflow_id, "stepId": step.step_id},
@@ -293,7 +349,13 @@ class DocumentAnalysisOrchestrator:
             if complex_indices:
                 decisions = self.gateway.generate_structured(
                     model_alias=model,
-                    prompt=question_helper._question_verification_prompt(generated, chunks),
+                    prompt=question_helper._question_verification_prompt(
+                        generated,
+                        self._evidence_chunks(
+                            chunks,
+                            list(generated.questions),
+                        ),
+                    ),
                     output_schema=QuestionVerificationOutput,
                     timeout_seconds=step.timeout_seconds,
                     metadata={"workflowId": plan.workflow_id, "stepId": step.step_id},
@@ -332,9 +394,21 @@ class DocumentAnalysisOrchestrator:
                 TaskType.CRITICAL_QUESTION_GENERATION: question_handler,
                 TaskType.CRITICAL_QUESTION_VERIFICATION: question_verifier,
             },
+            persist_plan=persist_plan,
         )
         if execution.status == WorkflowStatus.FAILED:
-            return self._result(execution)
+            result = self._result(execution)
+            WorkflowRepository(self.session).complete(
+                execution.workflow_id,
+                status=WorkflowStatus.FAILED,
+                result=result.model_dump(mode="json", by_alias=True),
+                error_message="; ".join(
+                    step.error for step in execution.steps if step.error
+                )
+                or None,
+            )
+            self.session.commit()
+            return result
         return self._persist_outputs(
             document_id,
             execution,
@@ -532,15 +606,9 @@ class DocumentAnalysisOrchestrator:
                 question_count += 1
 
         status = WorkflowStatus.NEEDS_REVIEW if needs_review else execution.status
-        if status != execution.status:
-            WorkflowRepository(self.session).complete(
-                execution.workflow_id,
-                status=status,
-                result=execution.model_dump(mode="json", by_alias=True),
-            )
-        self.session.commit()
+        self.session.flush()
         flags = SqlAlchemyRedFlagReader(self.session).list_for_document(document_id)
-        return DocumentAnalysisResult(
+        result = DocumentAnalysisResult(
             workflowId=execution.workflow_id,
             status=status,
             summaryId=summary_id,
@@ -549,6 +617,46 @@ class DocumentAnalysisOrchestrator:
             criticalQuestionCount=question_count,
             steps=[step.model_dump(mode="json", by_alias=True) for step in execution.steps],
         )
+        WorkflowRepository(self.session).complete(
+            execution.workflow_id,
+            status=status,
+            result=result.model_dump(mode="json", by_alias=True),
+        )
+        self.session.commit()
+        return result
+
+    @staticmethod
+    def _chunk_batches(chunks: list[DocumentChunkContract]) -> list[list[DocumentChunkContract]]:
+        batches: list[list[DocumentChunkContract]] = []
+        current: list[DocumentChunkContract] = []
+        current_tokens = 0
+        for chunk in chunks:
+            token_count = max(1, chunk.token_count)
+            if current and (
+                len(current) >= ANALYSIS_BATCH_MAX_CHUNKS
+                or current_tokens + token_count > ANALYSIS_BATCH_MAX_TOKENS
+            ):
+                batches.append(current)
+                current = []
+                current_tokens = 0
+            current.append(chunk)
+            current_tokens += token_count
+        if current:
+            batches.append(current)
+        return batches or [[]]
+
+    @staticmethod
+    def _evidence_chunks(
+        chunks: list[DocumentChunkContract],
+        artifacts: list[Any],
+    ) -> list[DocumentChunkContract]:
+        chunk_ids = {
+            citation.chunk_id
+            for artifact in artifacts
+            for citation in getattr(artifact, "citations", [])
+        }
+        selected = [chunk for chunk in chunks if chunk.id in chunk_ids]
+        return selected or chunks[:ANALYSIS_BATCH_MAX_CHUNKS]
 
     @staticmethod
     def _save_citations(

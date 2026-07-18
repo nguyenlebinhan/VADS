@@ -1,10 +1,13 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim AS runtime
 
 ARG INSTALL_OCR=false
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=600 \
+    PIP_RETRIES=20
 
 WORKDIR /opt/vads
 
@@ -18,15 +21,21 @@ COPY app ./app
 COPY alembic.ini ./
 COPY alembic ./alembic
 
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python -m pip install --retries 20 --timeout 600 .
+
 RUN if [ "$INSTALL_OCR" = "true" ]; then \
         apt-get update \
         && apt-get install --no-install-recommends --yes libgl1 libglib2.0-0 libgomp1 \
-        && rm -rf /var/lib/apt/lists/* \
-        && python -m pip install --no-cache-dir paddlepaddle==3.2.0 \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    if [ "$INSTALL_OCR" = "true" ]; then \
+        python -m pip install --retries 20 --timeout 600 paddlepaddle==3.2.0 \
             --index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
-        && python -m pip install --no-cache-dir ".[ocr]"; \
-    else \
-        python -m pip install --no-cache-dir .; \
+            --extra-index-url https://pypi.org/simple \
+        && python -m pip install --retries 20 --timeout 600 ".[ocr]"; \
     fi
 
 USER vads

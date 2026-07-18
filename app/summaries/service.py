@@ -193,7 +193,6 @@ class SummaryService:
                 "point": chunk.point,
                 "pdfPageStart": chunk.pdf_page_start,
                 "pdfPageEnd": chunk.pdf_page_end,
-                "boundingBoxes": chunk.bounding_boxes,
                 "sourceConfidence": chunk.ocr_confidence,
             }
             for chunk in chunks

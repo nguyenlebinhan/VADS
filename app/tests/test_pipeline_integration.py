@@ -67,11 +67,28 @@ def test_pipeline_persists_ocr_bbox_pages_and_chunks(
     assert pages[0]["pageIndex"] == 0
     sections = client.get(f"/api/documents/{document_id}/sections").json()["data"]
     assert sections["items"][0]["sectionType"] == "ARTICLE"
-    chunks = client.get(f"/api/documents/{document_id}/chunks").json()["data"]["items"]
+    chunks_response = client.get(
+        f"/api/documents/{document_id}/chunks?page=1&pageSize=1"
+    ).json()["data"]
+    chunks = chunks_response["items"]
+    assert chunks_response["page"] == 1
+    assert chunks_response["pageSize"] == 1
+    assert chunks_response["totalItems"] == 1
+    assert chunks_response["totalPages"] == 1
     assert chunks[0]["article"] == "Điều 1"
     assert chunks[0]["startBlockId"] == page["blocks"][0]["id"]
     chunk = client.get(f"/api/documents/{document_id}/chunks/{chunks[0]['id']}").json()["data"]
     assert chunk["id"] == chunks[0]["id"]
+
+    analysis = client.post(f"/api/documents/{document_id}/analysis")
+    assert analysis.status_code == 202
+    accepted = analysis.json()["data"]
+    assert accepted["status"] == "PLANNED"
+    assert accepted["statusUrl"] == f"/api/workflows/{accepted['workflowId']}"
+    assert accepted["workflowId"] in application.state.fake_dispatcher.analysis_workflow_ids
+    workflow = client.get(accepted["statusUrl"])
+    assert workflow.status_code == 200
+    assert workflow.json()["data"]["status"] == "PLANNED"
 
     with application.state.session_factory() as session:
         document = session.get(Document, document_id)

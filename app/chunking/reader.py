@@ -49,6 +49,23 @@ class SqlAlchemyDocumentChunkReader:
             for chunk in self.chunk_repository.list_for_document(document_id)
         ]
 
+    def list_chunks_page(
+        self,
+        document_id: str,
+        *,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[DocumentChunkContract], int]:
+        chunks = self.chunk_repository.list_page(
+            document_id,
+            page=page,
+            page_size=page_size,
+        )
+        return (
+            [self._chunk_contract(chunk) for chunk in chunks],
+            self.chunk_repository.count_for_document(document_id),
+        )
+
     def get_chunk(self, chunk_id: str) -> DocumentChunkContract:
         chunk = self.chunk_repository.get(chunk_id)
         if chunk is None:

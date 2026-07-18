@@ -37,8 +37,9 @@ services:
     build:
       context: .
       args:
-        INSTALL_OCR: "true"
+        INSTALL_OCR: "${VADS_INSTALL_OCR:-true}"
     environment:
+      VADS_OCR_PROVIDER: "${VADS_OCR_PROVIDER:-PADDLEOCR}"
       PADDLE_PDX_MODEL_SOURCE: BOS
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
     volumes:

@@ -1,0 +1,116 @@
+{
+  "info": {
+    "_postman_id": "9918e3f9-79af-4997-85dd-a08844776f1f",
+    "name": "Regulatory Change Intelligence - Vertical Slice",
+    "description": "Run in order. Create a workspace first with the VADS collection. Select a DOCX/PDF for both upload requests. Both metadata objects use the same familyKey.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "exec": [
+          "pm.test('Successful response', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+          "if (pm.response.headers.get('Content-Type')?.includes('application/json')) { const b = pm.response.json(); if ('success' in b) pm.expect(b.success).to.eql(true); }"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - User context onboarding",
+      "item": [
+        {
+          "name": "Create or update my context",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "X-User-ID", "value": "{{userId}}"}],
+            "body": {"mode": "raw", "raw": "{\n  \"position\": \"Trưởng phòng Hành chính\",\n  \"department\": \"Văn phòng UBND huyện\",\n  \"organization\": \"UBND huyện\",\n  \"province\": \"Điện Biên\",\n  \"district\": \"Mường Nhé\",\n  \"responsibilities\": [\"tổng hợp báo cáo\", \"chuẩn bị nội dung họp\", \"theo dõi kế hoạch\"],\n  \"assignedProjects\": [\"project-001\", \"project-014\"]\n}"},
+            "url": "{{baseUrl}}/api/users/me/context"
+          }
+        },
+        {
+          "name": "Get my context",
+          "request": {"method": "GET", "header": [{"key": "X-User-ID", "value": "{{userId}}"}], "url": "{{baseUrl}}/api/users/me/context"}
+        }
+      ]
+    },
+    {
+      "name": "01 - Create demo project",
+      "event": [{"listen": "test", "script": {"exec": ["const b=pm.response.json(); pm.environment.set('projectId', b.data.id);"]}}],
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\n  \"workspaceId\": \"{{workspaceId}}\",\n  \"projectCode\": \"project-001\",\n  \"name\": \"Đề án phát triển du lịch cộng đồng\",\n  \"status\": \"CHO_THAM_DINH\",\n  \"domain\": \"Quản lý đầu tư\",\n  \"locations\": [\"Mường Nhé\"],\n  \"leadDepartment\": \"Phòng Kế hoạch\",\n  \"coordinatingDepartments\": [\"Phòng Tài chính\"],\n  \"legalBases\": [],\n  \"activities\": [\"Chuẩn bị hồ sơ thẩm định\"],\n  \"budgetSources\": [\"Ngân sách tỉnh\"],\n  \"timeline\": {\"stage\": \"APPRAISAL\"},\n  \"sections\": [{\"title\": \"Mục 4.2 - Quy trình thẩm định\"}]\n}"},
+        "url": "{{baseUrl}}/api/projects"
+      }
+    },
+    {
+      "name": "02 - Upload regulation 2024",
+      "event": [{"listen": "test", "script": {"exec": ["const b=pm.response.json(); pm.environment.set('oldDocumentId', b.data.documentId);"]}}],
+      "request": {
+        "method": "POST",
+        "body": {"mode": "formdata", "formdata": [
+          {"key": "file", "type": "file", "src": ""},
+          {"key": "metadata", "type": "text", "value": "{\"workspaceId\":\"{{workspaceId}}\",\"familyKey\":\"quy-dinh-tham-dinh-ngan-sach\",\"title\":\"Quy định thẩm định ngân sách\",\"documentNumber\":\"01/2024/QD-UBND\",\"documentType\":\"QUYET_DINH\",\"issuingAgency\":\"UBND tỉnh\",\"issuedDate\":\"2024-01-10\",\"effectiveDate\":\"2024-02-01\",\"domain\":\"Quản lý đầu tư\",\"applicableSubjects\":[\"Dự án sử dụng ngân sách tỉnh\"]}"}
+        ]},
+        "url": "{{baseUrl}}/api/documents"
+      }
+    },
+    {
+      "name": "03 - Upload regulation 2026",
+      "event": [{"listen": "test", "script": {"exec": ["const b=pm.response.json(); pm.environment.set('newDocumentId', b.data.documentId); pm.environment.set('documentId', b.data.documentId);"]}}],
+      "request": {
+        "method": "POST",
+        "body": {"mode": "formdata", "formdata": [
+          {"key": "file", "type": "file", "src": ""},
+          {"key": "metadata", "type": "text", "value": "{\"workspaceId\":\"{{workspaceId}}\",\"familyKey\":\"quy-dinh-tham-dinh-ngan-sach\",\"title\":\"Quy định thẩm định ngân sách\",\"documentNumber\":\"01/2026/QD-UBND\",\"documentType\":\"QUYET_DINH\",\"issuingAgency\":\"UBND tỉnh\",\"issuedDate\":\"2026-01-10\",\"effectiveDate\":\"2026-02-01\",\"domain\":\"Quản lý đầu tư\",\"applicableSubjects\":[\"Dự án sử dụng ngân sách tỉnh\"]}"}
+        ]},
+        "url": "{{baseUrl}}/api/documents"
+      }
+    },
+    {
+      "name": "04 - Analyze new version",
+      "event": [{"listen": "test", "script": {"exec": ["const b=pm.response.json(); pm.environment.set('regulatoryRunId', b.data.run.id); if (b.data.impacts.length) pm.environment.set('impactId', b.data.impacts[0].id);"]}}],
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"force\":false}"},
+        "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/analyze"
+      }
+    },
+    {
+      "name": "05 - Document intelligence",
+      "item": [
+        {"name": "List regulatory documents", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents?workspaceId={{workspaceId}}"}},
+        {"name": "Regulatory profile", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/regulatory-profile"}},
+        {"name": "Summary", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/summary"}},
+        {"name": "Structured sections", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/structured-sections"}},
+        {"name": "Versions", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/versions"}},
+        {"name": "Timeline", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/timeline"}},
+        {"name": "Changes", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/changes"}},
+        {"name": "Legal relations", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{newDocumentId}}/legal-relations"}}
+      ]
+    },
+    {
+      "name": "06 - Projects and impacts",
+      "item": [
+        {"name": "List projects", "request": {"method": "GET", "url": "{{baseUrl}}/api/projects?workspaceId={{workspaceId}}"}},
+        {"name": "Get project", "request": {"method": "GET", "url": "{{baseUrl}}/api/projects/{{projectId}}"}},
+        {"name": "Project impact history", "request": {"method": "GET", "url": "{{baseUrl}}/api/projects/{{projectId}}/impacts"}},
+        {"name": "List impacts", "request": {"method": "GET", "url": "{{baseUrl}}/api/impacts"}},
+        {"name": "Get impact", "request": {"method": "GET", "url": "{{baseUrl}}/api/impacts/{{impactId}}"}},
+        {"name": "Department impacts", "request": {"method": "GET", "url": "{{baseUrl}}/api/departments/Phòng Tài chính/impacts"}},
+        {"name": "Review impact", "request": {"method": "PATCH", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"status\":\"ACCEPTED\",\"reviewedBy\":\"legal-expert-001\",\"note\":\"Đã kiểm tra bằng chứng\"}"}, "url": "{{baseUrl}}/api/impacts/{{impactId}}/review"}}
+      ]
+    },
+    {
+      "name": "07 - Agent audit",
+      "item": [
+        {"name": "Get agent run", "request": {"method": "GET", "url": "{{baseUrl}}/api/agent-runs/{{regulatoryRunId}}"}},
+        {"name": "Retry agent run", "request": {"method": "POST", "url": "{{baseUrl}}/api/agent-runs/{{regulatoryRunId}}/retry"}}
+      ]
+    }
+  ],
+  "variable": [{"key": "baseUrl", "value": "http://localhost:8000"}]
+}

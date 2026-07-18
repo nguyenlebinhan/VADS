@@ -1,0 +1,145 @@
+{
+  "info": {
+    "_postman_id": "7d078dc3-378f-4819-af6b-4dc64a6ec84f",
+    "name": "VADS - Full API",
+    "description": "Full VADS API collection. Run Create workspace first, select a PDF/DOCX in Upload document, then run the remaining folders in order. IDs are saved automatically.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Status is successful', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+          "if (pm.response.headers.get('Content-Type') && pm.response.headers.get('Content-Type').includes('application/json')) {",
+          "  const json = pm.response.json();",
+          "  if (Object.prototype.hasOwnProperty.call(json, 'success')) pm.test('Envelope success is true', function () { pm.expect(json.success).to.eql(true); });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {"name": "Health check", "request": {"method": "GET", "url": "{{baseUrl}}/health/live"}},
+        {"name": "OpenAPI JSON", "request": {"method": "GET", "url": "{{baseUrl}}/api/openapi.json"}}
+      ]
+    },
+    {
+      "name": "01 - Workspaces",
+      "item": [
+        {
+          "name": "Create workspace",
+          "event": [{"listen": "test", "script": {"exec": ["const body = pm.response.json();", "if (body.data && body.data.id) pm.environment.set('workspaceId', body.data.id);"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"name\": \"Phân tích dự thảo\",\n  \"description\": \"Workspace kiểm thử Postman\"\n}"},
+            "url": "{{baseUrl}}/api/workspaces"
+          }
+        },
+        {"name": "Workspace dashboard", "request": {"method": "GET", "url": "{{baseUrl}}/api/workspaces/{{workspaceId}}/dashboard"}}
+      ]
+    },
+    {
+      "name": "02 - Documents",
+      "item": [
+        {
+          "name": "Upload document",
+          "event": [{"listen": "test", "script": {"exec": ["const body = pm.response.json();", "if (body.data && body.data.documentId) pm.environment.set('documentId', body.data.documentId);"]}}],
+          "request": {
+            "method": "POST",
+            "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": ""}, {"key": "displayName", "value": "Tài liệu kiểm thử", "type": "text"}]},
+            "url": "{{baseUrl}}/api/workspaces/{{workspaceId}}/documents"
+          }
+        },
+        {"name": "Get document", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}"}},
+        {"name": "Processing status", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/status"}},
+        {"name": "List pages", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/pages"}},
+        {"name": "Get page", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/pages/{{pageIndex}}"}},
+        {"name": "List sections", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/sections"}},
+        {
+          "name": "List chunks",
+          "event": [{"listen": "test", "script": {"exec": ["const body = pm.response.json();", "if (body.data && body.data.items && body.data.items.length) pm.environment.set('chunkId', body.data.items[0].id);"]}}],
+          "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/chunks"}
+        },
+        {"name": "Get chunk", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/chunks/{{chunkId}}"}},
+        {"name": "Viewer data", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/viewer-data"}},
+        {"name": "Reprocess document", "request": {"method": "POST", "url": "{{baseUrl}}/api/documents/{{documentId}}/reprocess"}},
+        {"name": "Delete document (run last)", "request": {"method": "DELETE", "url": "{{baseUrl}}/api/documents/{{documentId}}"}}
+      ]
+    },
+    {
+      "name": "03 - AI Analysis",
+      "item": [
+        {
+          "name": "Analyze document",
+          "event": [{"listen": "test", "script": {"exec": ["const body = pm.response.json();", "if (body.data && body.data.workflowId) pm.environment.set('workflowId', body.data.workflowId);"]}}],
+          "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"privateProcessing\": false\n}"}, "url": "{{baseUrl}}/api/documents/{{documentId}}/analysis"}
+        },
+        {"name": "Get workflow", "request": {"method": "GET", "url": "{{baseUrl}}/api/workflows/{{workflowId}}"}},
+        {
+          "name": "Generate summary",
+          "event": [{"listen": "test", "script": {"exec": ["const body = pm.response.json();", "if (body.data && body.data.summary && body.data.summary.id) pm.environment.set('summaryId', body.data.summary.id);"]}}],
+          "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"privateProcessing\": false\n}"}, "url": "{{baseUrl}}/api/documents/{{documentId}}/summaries/generate"}
+        },
+        {"name": "List summaries", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/summaries"}},
+        {"name": "Get summary", "request": {"method": "GET", "url": "{{baseUrl}}/api/summaries/{{summaryId}}"}},
+        {"name": "Generate knowledge graph", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"privateProcessing\": false\n}"}, "url": "{{baseUrl}}/api/documents/{{documentId}}/knowledge-graph/generate"}},
+        {"name": "Get knowledge graph", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/knowledge-graph"}},
+        {"name": "Get red flags", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/red-flags?include_suppressed=false"}},
+        {"name": "Generate critical questions", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"privateProcessing\": false\n}"}, "url": "{{baseUrl}}/api/documents/{{documentId}}/critical-questions/generate"}},
+        {"name": "Get critical questions", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/critical-questions"}},
+        {"name": "Analysis overview", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/analysis-overview"}}
+      ]
+    },
+    {
+      "name": "04 - Index and Retrieval",
+      "item": [
+        {"name": "Index document", "request": {"method": "POST", "url": "{{baseUrl}}/api/documents/{{documentId}}/index"}},
+        {"name": "Index status", "request": {"method": "GET", "url": "{{baseUrl}}/api/documents/{{documentId}}/index/status"}},
+        {"name": "Rebuild index", "request": {"method": "POST", "url": "{{baseUrl}}/api/documents/{{documentId}}/index/rebuild"}},
+        {
+          "name": "Hybrid retrieval",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"query\": \"Nội dung chính của tài liệu là gì?\",\n  \"filters\": {\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"documentIds\": [\"{{documentId}}\"]\n  },\n  \"mode\": \"HYBRID\"\n}"},
+            "url": "{{baseUrl}}/api/retrieval/search"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Chat",
+      "item": [
+        {
+          "name": "Create chat session",
+          "event": [{"listen": "test", "script": {"exec": ["const body = pm.response.json();", "if (body.data && body.data.id) pm.environment.set('chatSessionId', body.data.id);"]}}],
+          "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"title\": \"Hỏi đáp tài liệu\",\n  \"isPrivate\": false\n}"}, "url": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat/sessions"}
+        },
+        {"name": "Get chat session", "request": {"method": "GET", "url": "{{baseUrl}}/api/chat/sessions/{{chatSessionId}}"}},
+        {"name": "List chat messages", "request": {"method": "GET", "url": "{{baseUrl}}/api/chat/sessions/{{chatSessionId}}/messages"}},
+        {"name": "Send chat message", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"question\": \"Tóm tắt các điểm quan trọng\",\n  \"documentIds\": [\"{{documentId}}\"],\n  \"stream\": false\n}"}, "url": "{{baseUrl}}/api/chat/sessions/{{chatSessionId}}/messages"}},
+        {"name": "Stream chat message (SSE)", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Accept", "value": "text/event-stream"}], "body": {"mode": "raw", "raw": "{\n  \"question\": \"Điều khoản nào cần lưu ý?\",\n  \"documentIds\": [\"{{documentId}}\"],\n  \"stream\": true\n}"}, "url": "{{baseUrl}}/api/chat/sessions/{{chatSessionId}}/messages/stream"}},
+        {"name": "Delete chat session (run last)", "request": {"method": "DELETE", "url": "{{baseUrl}}/api/chat/sessions/{{chatSessionId}}"}}
+      ]
+    },
+    {
+      "name": "06 - Meeting",
+      "item": [
+        {
+          "name": "Create meeting session",
+          "event": [{"listen": "test", "script": {"exec": ["const body = pm.response.json();", "if (body.data && body.data.id) pm.environment.set('meetingSessionId', body.data.id);"]}}],
+          "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"workspaceId\": \"{{workspaceId}}\",\n  \"title\": \"Cuộc họp kiểm thử\",\n  \"documentIds\": [\"{{documentId}}\"]\n}"}, "url": "{{baseUrl}}/api/meeting-sessions"}
+        },
+        {"name": "Upload meeting audio", "request": {"method": "POST", "body": {"mode": "formdata", "formdata": [{"key": "audio", "type": "file", "src": ""}]}, "url": "{{baseUrl}}/api/meeting-sessions/{{meetingSessionId}}/audio"}},
+        {"name": "Get transcript", "request": {"method": "GET", "url": "{{baseUrl}}/api/meeting-sessions/{{meetingSessionId}}/transcript"}}
+      ]
+    }
+  ],
+  "variable": [{"key": "baseUrl", "value": "http://localhost:8000"}]
+}

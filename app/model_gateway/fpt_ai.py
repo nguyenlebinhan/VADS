@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from pydantic import SecretStr
 
 from app.config.settings import Settings
-from app.model_gateway.errors import ModelUnavailableError
+from app.model_gateway.errors import ModelRateLimitError, ModelUnavailableError
 from app.model_gateway.gateway import ModelGateway, ModelResponse, UnavailableModelGateway
 
 # This FPT account exposes VADS aliases directly. Deployments with different
@@ -213,6 +213,15 @@ class FptAiModelGateway(ModelGateway):
                 raw = response.read()
         except HTTPError as exc:
             detail = self._safe_http_error(exc)
+            if exc.code == 429:
+                retry_after = exc.headers.get("Retry-After")
+                raise ModelRateLimitError(
+                    model_alias,
+                    f"FPT AI request failed with HTTP 429: {detail}",
+                    retry_after_seconds=(
+                        int(retry_after) if retry_after and retry_after.isdigit() else None
+                    ),
+                ) from exc
             raise ModelUnavailableError(
                 model_alias,
                 f"FPT AI request failed with HTTP {exc.code}: {detail}",

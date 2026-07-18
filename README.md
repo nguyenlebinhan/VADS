@@ -214,3 +214,41 @@ Chạy health check theo alias:
 ```bash
 python -c "from app.config.settings import Settings; from app.model_gateway.fpt_ai import build_fpt_ai_gateway; print(build_fpt_ai_gateway(Settings()).health_check('GLM-5.2'))"
 ```
+
+## Kiểm thử toàn bộ API bằng Postman
+
+1. Chạy backend bằng `docker compose up --build`.
+2. Import collection [`docs/postman/VADS.postman_collection.json`](docs/postman/VADS.postman_collection.json).
+3. Import environment [`docs/postman/VADS.postman_environment.json`](docs/postman/VADS.postman_environment.json) và chọn **VADS Local**.
+4. Chạy lần lượt các folder. Ở request upload, chọn một file PDF/DOCX; ở request audio, chọn file âm thanh.
+
+Collection tự lưu `workspaceId`, `documentId`, `chunkId`, `workflowId`, `summaryId`,
+`chatSessionId` và `meetingSessionId` từ response. Có thể import trực tiếp OpenAPI từ
+`http://localhost:8000/api/openapi.json`; Swagger UI nằm tại `http://localhost:8000/api/docs`.
+
+## Regulatory Change Intelligence vertical slice
+
+Backend Python/FastAPI hiện hỗ trợ flow đầu tiên: upload nhiều phiên bản của cùng văn bản, parse
+cấu trúc pháp lý, phát hiện thay đổi số liệu/thời hạn/trách nhiệm, mapping với đề án, xác định phòng
+ban và hành động, verification và audit từng agent task.
+
+Tài liệu kiến trúc, ERD, sequence và API nằm tại
+[`docs/regulatory-change-architecture.md`](docs/regulatory-change-architecture.md).
+
+Metadata khi gọi `POST /api/documents` được gửi dưới dạng JSON trong field multipart `metadata`;
+file nằm trong field `file`. Chạy demo/test end-to-end:
+
+```bash
+pytest app/tests/test_regulatory_change_vertical_slice.py -q
+```
+
+Tạo hai file DOCX demo rồi import collection Postman:
+
+```bash
+python scripts/generate_regulatory_demo_documents.py
+```
+
+- [`Regulatory Change Postman collection`](docs/postman/Regulatory-Change-Vertical-Slice.postman_collection.json)
+- [`VADS Local environment`](docs/postman/VADS.postman_environment.json)
+
+Danh mục đầy đủ 60 API operations: [`docs/api-catalog.md`](docs/api-catalog.md).
