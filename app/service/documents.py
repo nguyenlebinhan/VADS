@@ -56,6 +56,8 @@ class DocumentService(Service):
         *,
         display_name: str | None = None,
         uploaded_by: str | None = None,
+        commune_id: str | None = None,
+        owner_id: str | None = None,
     ) -> DocumentUploadResponse:
         workspace = self.workspace_repository.get_active(workspace_id)
         if workspace is None:
@@ -85,6 +87,8 @@ class DocumentService(Service):
 
             document = Document(
                 id=document_id,
+                commune_id=commune_id,
+                owner_id=owner_id,
                 workspace_id=workspace_id,
                 uploaded_by=uploaded_by,
                 display_name=resolved_display_name,

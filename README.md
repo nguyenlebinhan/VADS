@@ -54,9 +54,21 @@ chỉ `.env.example` được quản lý trong Git.
 
 ## Chạy trực tiếp
 
+YĂªu cáº§u Python `>=3.12,<3.14`. TrĂªn Windows nĂªn táº¡o virtualenv báº±ng Python launcher Ä‘á»ƒ
+trĂ¡nh dĂ¹ng nháº§m Python 3.14:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[test]"
+```
+
+TrĂªn macOS/Linux:
+
 ```bash
-python -m venv .venv
-pip install -e ".[test]"
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e ".[test]"
 cp .env.example .env
 alembic upgrade head
 uvicorn app.main:app --reload
@@ -253,3 +265,147 @@ python scripts/generate_regulatory_demo_documents.py
 - [`VADS Local environment`](docs/postman/VADS.postman_environment.json)
 
 Danh mục API bảo mật và 49 operation legacy đã hợp nhất: [`docs/api-catalog.md`](docs/api-catalog.md).
+
+## Upload và RAG từ database
+
+Frontend dùng luồng bảo mật sau:
+
+```text
+POST /api/v1/documents
+  -> lưu file gốc vào MinIO/S3
+  -> lưu metadata và processing job vào database
+  -> Celery trích xuất nội dung và ghi document_chunks vào database
+
+POST /api/v1/rag/query
+  -> kiểm tra quyền của người dùng trên tài liệu
+  -> retrieval từ document_chunks
+  -> gửi các chunk phù hợp cho mô hình và trả câu trả lời kèm nguồn
+```
+
+Request RAG nhận một hoặc nhiều tài liệu đã xử lý:
+
+```json
+{
+  "question": "Thời hạn nộp báo cáo là bao lâu?",
+  "document_ids": ["document-id"],
+  "top_k": 5
+}
+```
+
+File người dùng tải lên không được lưu trực tiếp dưới dạng BLOB trong database. File gốc nằm ở
+object storage; database lưu metadata, trạng thái xử lý, nội dung đã tách và các chunk dùng cho
+retrieval. `VADS_USER_DOCUMENT_UPLOAD_ENABLED=true` mở upload cho tài khoản USER.
+
+## DOCX RAG standalone (legacy)
+
+Module `app/docx_rag` ở chế độ legacy chỉ đọc các file `.docx` trong `app/data`, gồm cả paragraph và table.
+Frontend không dùng thư mục này làm nguồn dữ liệu người dùng.
+Index được cache tại `.cache/docx_rag/index.json`; cache này không chứa API key và đã được
+gitignore. Nếu embedding không gọi được, hệ thống tự chuyển sang lexical retrieval. Việc sinh câu
+trả lời vẫn cần OpenAI API key.
+
+Thiết lập một trong hai biến môi trường sau (không ghi key thật vào source hoặc `.env.example`):
+
+```powershell
+$env:OPENAI_API_KEY="<your-key>"
+# hoặc
+$env:VADS_OPENAI_API_KEY="<your-key>"
+```
+
+Chạy thử bằng terminal:
+
+```bash
+python scripts/test_docx_rag.py "Câu hỏi cần hỏi"
+python scripts/test_docx_rag.py "Câu hỏi cần hỏi" --lexical-only
+```
+
+Model mặc định là `text-embedding-3-small` và `gpt-4.1-mini`. Có thể đổi bằng
+`VADS_OPENAI_EMBEDDING_MODEL`, `VADS_OPENAI_CHAT_MODEL`, hoặc đổi endpoint tương thích bằng
+`VADS_OPENAI_BASE_URL`.
+
+API FastAPI:
+
+```text
+POST /api/docx-rag/query
+```
+
+```json
+{
+  "question": "Thời hạn lưu hồ sơ là bao lâu?",
+  "top_k": 5,
+  "rebuild_index": false
+}
+```
+
+Mỗi lần gọi API, backend thực hiện retrieval và sinh câu trả lời ngay, đồng thời tạo một
+`query_id` UUID mới. Kể cả khi gửi cùng một câu hỏi nhiều lần, mỗi request vẫn có ID riêng.
+Response của POST chỉ trả metadata về sources, không trả mảng `sources`:
+
+```json
+{
+  "query_id": "b3e26bd0-23ef-4fcb-9cb6-895108f72ea6",
+  "answer": "Hồ sơ phải được lưu trong năm năm. [Nguồn 1]",
+  "retrieval_mode": "embedding",
+  "sources_available": true,
+  "source_count": 1,
+  "page_note": "page_number is null because DOCX uses a flowing layout and does not store a stable, device-independent page number.",
+  "embedding_error": null
+}
+```
+
+Chỉ lấy sources khi người dùng yêu cầu xem nguồn:
+
+```text
+GET /api/docx-rag/queries/{query_id}/sources
+```
+
+```json
+{
+  "query_id": "b3e26bd0-23ef-4fcb-9cb6-895108f72ea6",
+  "sources": [
+    {
+      "file_name": "70_2025_ND-CP_577816.docx",
+      "chunk_id": "70_2025_ND-CP_577816.docx:chunk-0003",
+      "paragraph_index": 15,
+      "table_index": null,
+      "paragraph_indices": [15, 16],
+      "table_indices": [],
+      "article": "Điều 3",
+      "clause": "Khoản 2",
+      "page_number": null,
+      "quote": "Đoạn trích nguyên bản...",
+      "score": 0.87
+    }
+  ],
+  "page_note": "page_number is null because DOCX uses a flowing layout and does not store a stable, device-independent page number."
+}
+```
+
+Endpoint GET chỉ đọc sources đã lưu từ POST, không chạy embedding, retrieval hoặc gọi OpenAI
+lại. ID không tồn tại hoặc đã hết hạn trả HTTP 404. Sources được giữ trong bộ nhớ 30 phút theo
+mặc định; có thể đổi TTL bằng `VADS_DOCX_RAG_QUERY_TTL_SECONDS`.
+
+Frontend phải lưu `query_id` riêng trên từng assistant message, không dùng một
+`currentQueryId` chung cho cả cuộc trò chuyện:
+
+```javascript
+const queryResult = await postQuestion(question);
+
+const assistantMessage = {
+  content: queryResult.answer,
+  queryId: queryResult.query_id,
+  sources: null,
+};
+
+// Chỉ gọi khi người dùng bấm "Xem nguồn" trên đúng message này.
+const sourceResult = await fetch(
+  `/api/docx-rag/queries/${assistantMessage.queryId}/sources`,
+);
+```
+
+Store hiện tại là in-memory nên dữ liệu sources sẽ mất khi backend restart và không được chia sẻ
+giữa nhiều worker/process. Production nên thay implementation của `SourceStore` bằng Redis hoặc
+database.
+
+`page_number` luôn là `null`: DOCX dùng layout động nên không có số trang cố định độc lập với
+font, máy in và trình hiển thị. Response trả thêm `page_note` để giải thích giới hạn này.

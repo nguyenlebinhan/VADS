@@ -10,7 +10,17 @@ import {
   Maximize2, Copy, Mail, Users, Lock, BookOpen, Hash,
   User, Phone, MapPin, Save, FileUp, GripVertical, Briefcase, Layers,
 } from "lucide-react";
-import { changePassword, listDocuments, type DocumentPublic, type UserPublic } from "../api";
+import {
+  ApiError,
+  changePassword,
+  listDocuments,
+  queryDocumentRag,
+  reprocessDocument,
+  uploadDocument,
+  type DocumentPublic,
+  type RagQueryResult,
+  type UserPublic,
+} from "../api";
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -52,8 +62,23 @@ interface ImportData {
   thon: string;
   xa: string;
   tinh: string;
-  baoCaoFile: string | null;
-  vanBanFile: string | null;
+  baoCaoFile: File | null;
+  vanBanFile: File | null;
+}
+
+function duplicateDocumentId(reason: unknown): string | null {
+  if (!(reason instanceof ApiError) || reason.code !== "DUPLICATE_DOCUMENT") return null;
+  if (!reason.details || typeof reason.details !== "object") return null;
+  const existingDocumentId = (reason.details as Record<string, unknown>).existingDocumentId;
+  return typeof existingDocumentId === "string" && existingDocumentId.length > 0
+    ? existingDocumentId
+    : null;
+}
+
+interface ChatMessage {
+  role: "assistant" | "user";
+  text: string;
+  sources?: RagQueryResult["sources"];
 }
 
 // ─── DATA ────────────────────────────────────────────────────────────────────
@@ -217,7 +242,23 @@ const SUMMARY_TABS = [
   { key: "impact", label: "Tác động", content: "Tác động tích cực: rút ngắn thủ tục hành chính 30–40%, tăng cường phân cấp cho địa phương. Cần lưu ý: các địa phương cần nâng cao năng lực cán bộ; doanh nghiệp xây dựng cần cập nhật quy trình nội bộ phù hợp quy định mới trong năm 2025." },
 ];
 
-const INIT_CHAT = [{ role: "assistant", text: "Xin chào! Tôi là trợ lý AI phân tích tài liệu. Hãy đặt câu hỏi về nội dung tài liệu NĐ 15/2021/NĐ-CP." }];
+function initialRagChatMessages(documents: DocumentPublic[]): ChatMessage[] {
+  if (documents.length === 0) {
+    return [{
+      role: "assistant",
+      text: "Chưa có tài liệu đã xử lý trong database. Hãy tải PDF hoặc DOCX lên để tôi có dữ liệu tra cứu.",
+    }];
+  }
+  const names = documents
+    .slice(0, 2)
+    .map(document => document.title)
+    .join(", ");
+  const extra = documents.length > 2 ? ` và ${documents.length - 2} tài liệu khác` : "";
+  return [{
+    role: "assistant",
+    text: `Tôi sẽ trả lời dựa trên dữ liệu đã xử lý trong database từ: ${names}${extra}.`,
+  }];
+}
 
 const HIGHLIGHT_TERMS = [
   { term: "vốn đầu tư công", definition: "Nguồn vốn thuộc ngân sách nhà nước, vốn từ nguồn thu hợp pháp của các cơ quan nhà nước dùng để đầu tư.", sectionId: "dieu-1" },
@@ -872,26 +913,27 @@ function ImportModal({ onClose, onSubmit, currentUser }: {
   const [chucVu, setChucVu] = useState(currentUser.position ?? "");
   const [phongBan, setPhongBan] = useState(currentUser.department ?? "");
   const [thon, setThon] = useState("");
-  const [xa, setXa] = useState("");
-  const [tinh, setTinh] = useState("");
-  const [baoCaoFile, setBaoCaoFile] = useState<string | null>(null);
-  const [vanBanFile, setVanBanFile] = useState<string | null>(null);
+  const [xa, setXa] = useState("Xã Phú Xuân");
+  const [tinh, setTinh] = useState("Tỉnh Thái Bình");
+  const [baoCaoFile, setBaoCaoFile] = useState<File | null>(null);
+  const [vanBanFile, setVanBanFile] = useState<File | null>(null);
   const baoCaoRef = useRef<HTMLInputElement>(null);
   const vanBanRef = useRef<HTMLInputElement>(null);
 
   const handleFileDrop = (type: "baoCao" | "vanBan", files: FileList | null) => {
     if (!files?.[0]) return;
-    if (type === "baoCao") setBaoCaoFile(files[0].name);
-    else setVanBanFile(files[0].name);
+    if (type === "baoCao") setBaoCaoFile(files[0]);
+    else setVanBanFile(files[0]);
   };
 
   const handleSubmit = () => {
+    if (!baoCaoFile && !vanBanFile) return;
     onSubmit({ ten, chucVu, phongBan, thon, xa, tinh, baoCaoFile, vanBanFile });
     onClose();
   };
 
   const UploadZone = ({ label, file, onClear, inputRef, type, accent }: {
-    label: string; file: string | null; onClear: () => void;
+    label: string; file: File | null; onClear: () => void;
     inputRef: React.RefObject<HTMLInputElement>; type: "baoCao" | "vanBan"; accent?: boolean;
   }) => (
     <div>
@@ -902,11 +944,11 @@ function ImportModal({ onClose, onSubmit, currentUser }: {
         onDrop={e => { e.preventDefault(); handleFileDrop(type, e.dataTransfer.files); }}
         className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors min-h-[120px] ${file ? "border-emerald-300 bg-emerald-50" : accent ? "border-[#C41E3A]/30 hover:border-[#C41E3A]/60 hover:bg-red-50/30" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"}`}
       >
-        <input ref={inputRef} type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={e => handleFileDrop(type, e.target.files)} />
+        <input ref={inputRef} type="file" className="hidden" accept=".pdf,.docx" onChange={e => handleFileDrop(type, e.target.files)} />
         {file ? (
           <>
             <CheckCircle2 className="w-7 h-7 text-emerald-500" />
-            <p className="text-xs font-semibold text-emerald-700 text-center break-all px-2">{file}</p>
+            <p className="text-xs font-semibold text-emerald-700 text-center break-all px-2">{file.name}</p>
             <button onClick={e => { e.stopPropagation(); onClear(); }} className="text-[10px] text-gray-400 hover:text-red-500 transition-colors mt-1">Xóa tệp</button>
           </>
         ) : (
@@ -915,7 +957,7 @@ function ImportModal({ onClose, onSubmit, currentUser }: {
               <FileUp className={`w-5 h-5 ${accent ? "text-[#C41E3A]" : "text-gray-400"}`} />
             </div>
             <p className="text-xs font-semibold text-gray-600">Kéo thả hoặc nhấp để tải lên</p>
-            <p className="text-[10px] text-gray-400">PDF, DOC, DOCX</p>
+            <p className="text-[10px] text-gray-400">PDF, DOCX</p>
           </>
         )}
       </div>
@@ -974,8 +1016,8 @@ function ImportModal({ onClose, onSubmit, currentUser }: {
 
         <div className="border-t border-gray-100 px-6 py-4 flex-shrink-0 flex items-center justify-between gap-4">
           <p className="text-[10px] text-gray-400 leading-relaxed flex-1">AI sẽ phân tích và đề xuất phương án phù hợp với chức vụ, phòng ban và địa phương của bạn</p>
-          <button onClick={handleSubmit}
-            className="flex items-center gap-2 bg-[#C41E3A] hover:bg-[#a8172f] text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md whitespace-nowrap flex-shrink-0">
+          <button onClick={handleSubmit} disabled={!baoCaoFile && !vanBanFile}
+            className="flex items-center gap-2 bg-[#C41E3A] hover:bg-[#a8172f] disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md whitespace-nowrap flex-shrink-0">
             <Brain className="w-3.5 h-3.5" />Bắt đầu phân tích
           </button>
         </div>
@@ -1280,22 +1322,23 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
-function DashboardScreen({ onNavigate, documents, documentsLoading, documentsError }: {
-  onNavigate: (s: Screen) => void; documents: DocumentPublic[];
-  documentsLoading: boolean; documentsError: string;
+function DashboardScreen({ onNavigate, onAnalyze, documentCount }: {
+  onNavigate: (s: Screen) => void;
+  onAnalyze: (baoCaoFile: File | null, vanBanFile: File | null) => void;
+  documentCount: number;
 }) {
-  const [baoCaoFile, setBaoCaoFile] = useState<string | null>(null);
-  const [vanBanFile, setVanBanFile] = useState<string | null>(null);
+  const [baoCaoFile, setBaoCaoFile] = useState<File | null>(null);
+  const [vanBanFile, setVanBanFile] = useState<File | null>(null);
+  const hasAnalysisFile = Boolean(baoCaoFile || vanBanFile);
   const baoCaoRef = useRef<HTMLInputElement>(null);
   const vanBanRef = useRef<HTMLInputElement>(null);
   const CARDS = [
-    { id: "documents", title: "Tài liệu của tôi", desc: "Quản lý và tra cứu toàn bộ tài liệu đã phân tích trong hệ thống.", icon: FileText, count: documentsLoading ? "Đang tải..." : `${documents.length} tài liệu` },
-    { id: "library", title: "Thư viện pháp luật", desc: "Giao diện minh họa; backend hiện chưa cung cấp API thư viện.", icon: Scale, count: "Chưa có API" },
-    { id: "notebook", title: "Sổ tay kiến thức", desc: "Giao diện minh họa; backend hiện chưa cung cấp API sổ tay.", icon: BookMarked, count: "Chưa có API" },
+    { id: "documents", title: "Tài liệu của tôi", desc: "Quản lý và tra cứu toàn bộ tài liệu đã phân tích trong hệ thống.", icon: FileText, count: `${documentCount} tài liệu` },
+    { id: "library", title: "Thư viện pháp luật", desc: "Tra cứu toàn bộ văn bản pháp luật hiện hành và đã hết hiệu lực.", icon: Scale, count: "1.240 văn bản" },
+    { id: "notebook", title: "Sổ tay kiến thức", desc: "Lưu trữ thuật ngữ và định nghĩa pháp lý được trích xuất tự động.", icon: BookMarked, count: "87 mục từ" },
   ];
   return (
     <div className="space-y-5">
-      {documentsError && <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700"><AlertCircle className="h-4 w-4" />{documentsError}</div>}
       <div className="relative rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-gray-50">
@@ -1304,7 +1347,7 @@ function DashboardScreen({ onNavigate, documents, documentsLoading, documentsErr
           </div>
           <div>
             <h3 className="text-sm font-bold text-gray-900">Tải lên tài liệu phân tích</h3>
-            <p className="text-[10px] text-gray-400 mt-0.5">Tải đủ 2 tài liệu để AI phân tích và đề xuất phương án phù hợp</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">Tải lên ít nhất 1 tài liệu để AI phân tích và đề xuất phương án phù hợp</p>
           </div>
         </div>
 
@@ -1316,14 +1359,14 @@ function DashboardScreen({ onNavigate, documents, documentsLoading, documentsErr
             <div
               onClick={() => baoCaoRef.current?.click()}
               onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setBaoCaoFile(f.name); }}
+              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setBaoCaoFile(f); }}
               className={`rounded-xl border-2 border-dashed cursor-pointer flex flex-col items-center justify-center py-8 px-4 transition-all ${baoCaoFile ? "border-emerald-300 bg-emerald-50" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"}`}
             >
-              <input ref={baoCaoRef} type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={e => { if (e.target.files?.[0]) setBaoCaoFile(e.target.files[0].name); }} />
+              <input ref={baoCaoRef} type="file" className="hidden" accept=".pdf,.docx" onChange={e => { if (e.target.files?.[0]) setBaoCaoFile(e.target.files[0]); }} />
               {baoCaoFile ? (
                 <>
                   <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
-                  <p className="text-xs font-semibold text-emerald-700 text-center break-all px-1 leading-snug">{baoCaoFile}</p>
+                  <p className="text-xs font-semibold text-emerald-700 text-center break-all px-1 leading-snug">{baoCaoFile.name}</p>
                   <button onClick={e => { e.stopPropagation(); setBaoCaoFile(null); }} className="text-[10px] text-gray-400 hover:text-red-500 mt-2 transition-colors">Xóa tệp</button>
                 </>
               ) : (
@@ -1332,7 +1375,7 @@ function DashboardScreen({ onNavigate, documents, documentsLoading, documentsErr
                     <FileUp className="w-5 h-5 text-gray-400" />
                   </div>
                   <p className="text-xs font-semibold text-gray-600 text-center">Kéo thả hoặc nhấp để tải lên</p>
-                  <p className="text-[10px] text-gray-400 mt-1">PDF, DOC, DOCX</p>
+                  <p className="text-[10px] text-gray-400 mt-1">PDF, DOCX</p>
                 </>
               )}
             </div>
@@ -1344,14 +1387,14 @@ function DashboardScreen({ onNavigate, documents, documentsLoading, documentsErr
             <div
               onClick={() => vanBanRef.current?.click()}
               onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setVanBanFile(f.name); }}
+              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setVanBanFile(f); }}
               className={`rounded-xl border-2 border-dashed cursor-pointer flex flex-col items-center justify-center py-8 px-4 transition-all ${vanBanFile ? "border-emerald-300 bg-emerald-50" : "border-gray-200 hover:border-[#C41E3A]/50 hover:bg-red-50/30"}`}
             >
-              <input ref={vanBanRef} type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={e => { if (e.target.files?.[0]) setVanBanFile(e.target.files[0].name); }} />
+              <input ref={vanBanRef} type="file" className="hidden" accept=".pdf,.docx" onChange={e => { if (e.target.files?.[0]) setVanBanFile(e.target.files[0]); }} />
               {vanBanFile ? (
                 <>
                   <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
-                  <p className="text-xs font-semibold text-emerald-700 text-center break-all px-1 leading-snug">{vanBanFile}</p>
+                  <p className="text-xs font-semibold text-emerald-700 text-center break-all px-1 leading-snug">{vanBanFile.name}</p>
                   <button onClick={e => { e.stopPropagation(); setVanBanFile(null); }} className="text-[10px] text-gray-400 hover:text-red-500 mt-2 transition-colors">Xóa tệp</button>
                 </>
               ) : (
@@ -1360,7 +1403,7 @@ function DashboardScreen({ onNavigate, documents, documentsLoading, documentsErr
                     <FileUp className="w-5 h-5 text-[#C41E3A]" />
                   </div>
                   <p className="text-xs font-semibold text-gray-600 text-center">Kéo thả hoặc nhấp để tải lên</p>
-                  <p className="text-[10px] text-gray-400 mt-1">PDF, DOC, DOCX</p>
+                  <p className="text-[10px] text-gray-400 mt-1">PDF, DOCX</p>
                 </>
               )}
             </div>
@@ -1372,12 +1415,12 @@ function DashboardScreen({ onNavigate, documents, documentsLoading, documentsErr
           <div className="flex items-center gap-3 min-w-0">
             {baoCaoFile && <span className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-semibold whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />Báo cáo đã tải</span>}
             {vanBanFile && <span className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-semibold whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />Văn bản đã tải</span>}
-            {!baoCaoFile && !vanBanFile && <p className="text-[11px] text-gray-400">Cần tải lên đủ 2 tài liệu để bắt đầu phân tích</p>}
+            {!baoCaoFile && !vanBanFile && <p className="text-[11px] text-gray-400">Cần tải lên ít nhất 1 tài liệu để bắt đầu phân tích</p>}
           </div>
           <button
-            disabled={!baoCaoFile || !vanBanFile}
-            onClick={() => onNavigate("processing")}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex-shrink-0 ${baoCaoFile && vanBanFile ? "bg-[#C41E3A] hover:bg-[#a8172f] text-white shadow-md shadow-[#C41E3A]/25" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+            disabled={!hasAnalysisFile}
+            onClick={() => { if (hasAnalysisFile) onAnalyze(baoCaoFile, vanBanFile); }}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex-shrink-0 ${hasAnalysisFile ? "bg-[#C41E3A] hover:bg-[#a8172f] text-white shadow-md shadow-[#C41E3A]/25" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
           >
             <Brain className="w-3.5 h-3.5" />Bắt đầu phân tích
           </button>
@@ -1406,75 +1449,138 @@ function DashboardScreen({ onNavigate, documents, documentsLoading, documentsErr
 
 // ─── MY DOCUMENTS ─────────────────────────────────────────────────────────────
 
-function MyDocumentsScreen({ documents, loading, error, onRefresh }: {
-  documents: DocumentPublic[]; loading: boolean; error: string; onRefresh: () => void;
+function MyDocumentsScreen({
+  documents,
+  onReload,
+}: {
+  documents: DocumentPublic[];
+  onReload: () => Promise<void>;
 }) {
-  const years = useMemo(() => Array.from(new Set(documents.map((document) =>
-    new Date(document.created_at).getFullYear().toString()))).sort((a, b) => b.localeCompare(a)), [documents]);
-  const [year, setYear] = useState("");
+  const rows = documents.map(document => {
+    const createdAt = new Date(document.created_at);
+    return {
+      ...document,
+      date: new Intl.DateTimeFormat("vi-VN").format(createdAt),
+      month: `Tháng ${createdAt.getMonth() + 1}`,
+      year: String(createdAt.getFullYear()),
+    };
+  });
+  const years = Array.from(new Set(rows.map(document => document.year))).sort().reverse();
+  const [year, setYear] = useState(years[0] ?? String(new Date().getFullYear()));
   const [open, setOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [ragResult, setRagResult] = useState<RagQueryResult | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const selectedDocument = documents.find(document => document.id === selectedId) ?? null;
+  const visibleRows = rows.filter(document => document.year === year);
+  const months = Array.from(new Set(visibleRows.map(document => document.month))).reverse();
+
   useEffect(() => {
-    if (years.length > 0 && (!year || !years.includes(year))) setYear(years[0]);
-  }, [year, years]);
-  const visibleDocuments = documents.filter((document) =>
-    !year || new Date(document.created_at).getFullYear().toString() === year);
-  const grouped = Array.from(visibleDocuments.reduce((groups, document) => {
-    const monthNumber = new Date(document.created_at).getMonth() + 1;
-    const current = groups.get(monthNumber) ?? [];
-    current.push(document); groups.set(monthNumber, current); return groups;
-  }, new Map<number, DocumentPublic[]>())).sort(([a], [b]) => b - a);
+    if (years.length > 0 && !years.includes(year)) setYear(years[0]);
+  }, [documents, year]);
+
+  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await uploadDocument(file);
+      await onReload();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Không thể tải tài liệu lên.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleAsk(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedDocument || !question.trim()) return;
+    setAsking(true);
+    setError(null);
+    setRagResult(null);
+    try {
+      setRagResult(await queryDocumentRag(question.trim(), [selectedDocument.id]));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Không thể truy vấn tài liệu.");
+    } finally {
+      setAsking(false);
+    }
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Tài liệu của tôi</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{visibleDocuments.length} tài liệu{year ? ` trong năm ${year}` : " từ backend"}</p>
+          <p className="mt-0.5 text-sm text-gray-500">{visibleRows.length} tài liệu trong năm {year}</p>
         </div>
-        <div className="flex items-center gap-2"><button onClick={onRefresh} disabled={loading} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold text-gray-600 disabled:opacity-50"><RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />Làm mới</button><div className="relative">
-          <button onClick={() => setOpen(v => !v)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 hover:border-gray-300 shadow-sm">
-            <Calendar className="w-4 h-4 text-gray-400" />{year ? `Năm ${year}` : "Chưa có năm"}<ChevronDown className="w-4 h-4 text-gray-400" />
+        <div className="flex items-center gap-2">
+          <input ref={fileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={handleUpload} />
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+            className="flex items-center gap-2 rounded-lg bg-[#C41E3A] px-4 py-2 text-sm font-bold text-white hover:bg-[#a8172f] disabled:opacity-60">
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+            {uploading ? "Đang tải..." : "Tải tài liệu"}
           </button>
-          {open && years.length > 0 && (
-            <div className="absolute right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-xl z-10 overflow-hidden py-1">
-              {years.map(y => (
-                <button key={y} onClick={() => { setYear(y); setOpen(false); }}
-                  className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${year === y ? "text-[#C41E3A] font-bold" : "text-gray-700"}`}>{y}</button>
-              ))}
+          <div className="relative">
+            <button onClick={() => setOpen(value => !value)} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm">
+              <Calendar className="h-4 w-4 text-gray-400" />Năm {year}<ChevronDown className="h-4 w-4 text-gray-400" />
+            </button>
+            {open && (
+              <div className="absolute right-0 z-10 mt-1.5 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+                {(years.length ? years : [year]).map(value => (
+                  <button key={value} onClick={() => { setYear(value); setOpen(false); }} className={`block w-full px-4 py-2 text-left text-sm hover:bg-gray-50 ${year === value ? "font-bold text-[#C41E3A]" : "text-gray-700"}`}>{value}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {error && <div className="mb-5 flex items-start gap-2 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700"><AlertCircle className="h-4 w-4 flex-shrink-0" />{error}</div>}
+
+      {selectedDocument && (
+        <section className="mb-6 border-y border-gray-200 bg-white px-5 py-5">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div><p className="text-[10px] font-bold uppercase text-[#C41E3A]">RAG theo tài liệu</p><h3 className="mt-1 text-sm font-bold text-gray-900">{selectedDocument.title}</h3></div>
+            <button type="button" title="Đóng" onClick={() => { setSelectedId(null); setRagResult(null); }} className="p-1.5 text-gray-400 hover:text-gray-700"><X className="h-4 w-4" /></button>
+          </div>
+          <form onSubmit={handleAsk} className="flex gap-2">
+            <input value={question} onChange={event => setQuestion(event.target.value)} placeholder="Đặt câu hỏi về nội dung tài liệu" className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-sm outline-none focus:border-[#C41E3A]" />
+            <button type="submit" title="Gửi câu hỏi" disabled={asking || !question.trim()} className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0F1623] text-white hover:bg-[#C41E3A] disabled:opacity-50">{asking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
+          </form>
+          {ragResult && (
+            <div className="mt-5">
+              <p className="whitespace-pre-wrap text-sm leading-6 text-gray-700">{ragResult.answer}</p>
+              <div className="mt-4 divide-y divide-gray-100 border-t border-gray-100">
+                {ragResult.sources.map(source => <div key={source.chunk_id} className="py-3 text-xs text-gray-500"><p className="mb-1 font-semibold text-gray-700">{source.document_title}{source.page_number ? ` · Trang ${source.page_number}` : ""}</p><p className="leading-5">{source.quote}</p></div>)}
+              </div>
             </div>
           )}
-        </div></div>
-      </div>
-      {error && <div className="mb-5 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700"><AlertCircle className="w-4 h-4" />{error}</div>}
-      {loading && documents.length === 0 && <div className="flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white py-20 text-sm text-gray-400"><Loader2 className="w-5 h-5 animate-spin" />Đang tải tài liệu...</div>}
-      {!loading && !error && documents.length === 0 && <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-20 text-center"><FileText className="mx-auto mb-3 h-9 w-9 text-gray-300" /><p className="text-sm font-semibold text-gray-600">Chưa có tài liệu</p><p className="mt-1 text-xs text-gray-400">Backend chưa có tài liệu nào thuộc phạm vi tài khoản này.</p></div>}
-      <div className="space-y-8">
-        {grouped.map(([month, docs]) => (
-          <div key={month}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-2 h-2 rounded-full bg-[#C41E3A] flex-shrink-0" />
-              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Tháng {month}</h3>
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-[10px] text-gray-400 font-semibold">{docs.length} tài liệu</span>
-            </div>
-            <div className="grid grid-cols-3 gap-3 ml-5">
-              {docs.map(doc => (
-                <div key={doc.id} className="bg-white border border-black/[0.05] rounded-xl p-4 hover:shadow-md hover:border-[#C41E3A]/20 transition-all group">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 bg-gray-50 group-hover:bg-[#C41E3A]/8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors">
-                      <FileText className="w-4 h-4 text-gray-300 group-hover:text-[#C41E3A] transition-colors" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-gray-800 line-clamp-2 mb-2.5 leading-relaxed">{doc.title}</p>
-                      <div className="flex flex-wrap items-center gap-1.5"><span className={`rounded-full px-2 py-1 text-[9px] font-bold ${doc.status === "COMPLETED" ? "bg-emerald-50 text-emerald-700" : doc.status === "FAILED" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{STATUS_LABELS[doc.status]}</span><span className="rounded-full bg-gray-100 px-2 py-1 text-[9px] font-semibold text-gray-500">{APPROVAL_LABELS[doc.approval_status]}</span></div>
-                      <span className="mt-2 block text-[9px] text-gray-400 font-mono">{formatDocumentDate(doc.created_at)}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+        </section>
+      )}
+
+      {documents.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-200 bg-white px-6 py-16 text-center"><FileText className="mx-auto mb-3 h-8 w-8 text-gray-300" /><p className="text-sm font-semibold text-gray-700">Chưa có tài liệu</p></div>
+      ) : (
+        <div className="space-y-8">
+          {months.map(month => {
+            const monthDocuments = visibleRows.filter(document => document.month === month);
+            return <div key={month}>
+              <div className="mb-4 flex items-center gap-3"><div className="h-2 w-2 rounded-full bg-[#C41E3A]" /><h3 className="text-xs font-bold uppercase text-gray-500">{month}</h3><div className="h-px flex-1 bg-gray-200" /><span className="text-[10px] font-semibold text-gray-400">{monthDocuments.length} tài liệu</span></div>
+              <div className="ml-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {monthDocuments.map(document => <div key={document.id} className="rounded-lg border border-black/[0.05] bg-white p-4 hover:border-[#C41E3A]/20 hover:shadow-md"><div className="flex items-start gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-50"><FileText className="h-4 w-4 text-gray-400" /></div><div className="min-w-0 flex-1"><p className="mb-2.5 line-clamp-2 text-xs font-semibold leading-relaxed text-gray-800">{document.title}</p><div className="flex items-center justify-between gap-2"><StatusPill status={document.status} /><span className="font-mono text-[9px] text-gray-400">{document.date}</span></div><button type="button" onClick={() => { setSelectedId(document.id); setRagResult(null); setError(null); }} disabled={!(document.status === "COMPLETED" || document.status === "NEEDS_REVIEW")} className="mt-3 flex items-center gap-1.5 text-[11px] font-bold text-[#C41E3A] hover:underline disabled:cursor-not-allowed disabled:text-gray-300 disabled:no-underline"><MessageSquare className="h-3.5 w-3.5" />Hỏi tài liệu</button></div></div></div>)}
+              </div>
+            </div>;
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1666,22 +1772,34 @@ function KnowledgeNotebookScreen() {
 
 // ─── PROCESSING ───────────────────────────────────────────────────────────────
 
-function ProcessingScreen({ onComplete }: { onComplete: () => void }) {
-  const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState(0);
-  const stages = ["Đang đọc và phân tích tệp...", "Nhận diện cấu trúc văn bản...", "Trích xuất dữ liệu hành chính...", "Xây dựng sơ đồ tư duy...", "Phân tích hoàn tất!"];
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setProgress(p => {
-        const next = Math.min(100, p + 1.8);
-        setStage(Math.min(4, Math.floor(next / 20)));
-        if (next >= 100) { clearInterval(timer); setTimeout(onComplete, 900); }
-        return next;
-      });
-    }, 55);
-    return () => clearInterval(timer);
-  }, [onComplete]);
+function ProcessingScreen({ documents, fileNames, error, onBack }: {
+  documents: DocumentPublic[];
+  fileNames: string[];
+  error: string | null;
+  onBack: () => void;
+}) {
+  const progressByStatus: Record<DocumentPublic["status"], number> = {
+    UPLOADED: 15,
+    QUEUED: 30,
+    PROCESSING: 70,
+    COMPLETED: 100,
+    NEEDS_REVIEW: 100,
+    FAILED: 100,
+    CANCELLED: 100,
+  };
+  const progress = documents.length > 0
+    ? documents.reduce((sum, document) => sum + progressByStatus[document.status], 0) / documents.length
+    : 5;
+  const stage = error
+    ? error
+    : documents.length === 0
+      ? "Đang tải tài liệu lên máy chủ..."
+      : documents.every(document => ["COMPLETED", "NEEDS_REVIEW"].includes(document.status))
+        ? "Phân tích hoàn tất, đang mở kết quả..."
+        : documents.some(document => document.status === "PROCESSING")
+          ? "Đang trích xuất và chia nhỏ nội dung..."
+          : "Tài liệu đang chờ bộ xử lý...";
+  const activeStage = Math.min(3, Math.floor(progress / 25));
 
   return (
     <div className="fixed inset-0 bg-[#0A0F1A] flex items-center justify-center z-50">
@@ -1689,27 +1807,28 @@ function ProcessingScreen({ onComplete }: { onComplete: () => void }) {
         <div className="relative inline-flex items-center justify-center w-28 h-28 mb-8">
           <div className="absolute inset-0 rounded-full border-2 border-[#C41E3A]/20 animate-ping" style={{ animationDuration: "2s" }} />
           <div className="absolute inset-3 rounded-full border border-[#C41E3A]/15 animate-pulse" />
-          <div className="w-20 h-20 bg-gradient-to-br from-[#C41E3A] to-[#8a1224] rounded-2xl flex items-center justify-center shadow-xl shadow-[#C41E3A]/30">
-            <Brain className="w-9 h-9 text-white" />
+          <div className={`w-20 h-20 ${error ? "bg-red-700" : "bg-gradient-to-br from-[#C41E3A] to-[#8a1224]"} rounded-2xl flex items-center justify-center shadow-xl shadow-[#C41E3A]/30`}>
+            {error ? <AlertCircle className="w-9 h-9 text-white" /> : <Brain className="w-9 h-9 text-white" />}
           </div>
         </div>
         <div className="text-[10px] uppercase tracking-widest text-white/30 mb-2 font-semibold">VADS AI Analysis Engine</div>
-        <h2 className="text-white text-xl font-bold mb-1.5" style={{ fontFamily: "'Playfair Display', serif" }}>Đang phân tích tài liệu</h2>
-        <p className="text-white/40 text-sm mb-8">NĐ 15/2021/NĐ-CP · 48 trang · PDF</p>
+        <h2 className="text-white text-xl font-bold mb-1.5" style={{ fontFamily: "'Playfair Display', serif" }}>{error ? "Không thể xử lý tài liệu" : "Đang phân tích tài liệu"}</h2>
+        <p className="text-white/40 text-sm mb-8 line-clamp-2">{fileNames.join(" · ") || "Đang chuẩn bị tệp..."}</p>
         <div className="mb-2.5">
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
             <div className="h-full bg-gradient-to-r from-[#C41E3A] to-[#e0304e] rounded-full transition-all duration-200" style={{ width: `${progress}%` }} />
           </div>
         </div>
         <div className="flex items-center justify-between text-[11px] text-white/35 mb-8">
-          <span>{stages[stage]}</span>
+          <span className={error ? "text-red-300 text-left" : ""}>{stage}</span>
           <span className="font-mono font-semibold text-white/50">{Math.round(progress)}%</span>
         </div>
         <div className="flex justify-center gap-2">
-          {stages.slice(0, 4).map((_, i) => (
-            <div key={i} className={`rounded-full transition-all duration-300 ${i < stage ? "w-5 h-1.5 bg-[#C41E3A]" : i === stage ? "w-5 h-1.5 bg-[#C41E3A]/60 animate-pulse" : "w-1.5 h-1.5 bg-white/15"}`} />
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className={`rounded-full transition-all duration-300 ${i < activeStage ? "w-5 h-1.5 bg-[#C41E3A]" : i === activeStage ? "w-5 h-1.5 bg-[#C41E3A]/60 animate-pulse" : "w-1.5 h-1.5 bg-white/15"}`} />
           ))}
         </div>
+        {error && <button type="button" onClick={onBack} className="mt-8 rounded-lg border border-white/20 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">Quay lại</button>}
       </div>
     </div>
   );
@@ -1797,9 +1916,13 @@ function TreeDiagram({ onSelect, selectedId }: {
 
 // ─── WHITEBOARD SCREEN ────────────────────────────────────────────────────────
 
-function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, currentUser, onLogout }: {
-  onNavigate: (s: Screen) => void; importData: ImportData | null;
-  onProfile: () => void; onImport: () => void; currentUser: UserPublic;
+function WhiteboardScreen({ onNavigate, importData, ragDocuments, onProfile, onImport, currentUser, onLogout }: {
+  onNavigate: (s: Screen) => void;
+  importData: ImportData | null;
+  ragDocuments: DocumentPublic[];
+  onProfile: () => void;
+  onImport: () => void;
+  currentUser: UserPublic;
   onLogout: () => void | Promise<void>;
 }) {
   const [zoom, setZoom] = useState(0.9);
@@ -1811,7 +1934,11 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, current
   const [showShare, setShowShare] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState(INIT_CHAT);
+  const ragDocumentIds = ragDocuments.map(document => document.id);
+  const ragDocumentKey = ragDocumentIds.join("|");
+  const [messages, setMessages] = useState<ChatMessage[]>(() => initialRagChatMessages(ragDocuments));
+  const [asking, setAsking] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
   const [showDocViewer, setShowDocViewer] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [showSummary, setShowSummary] = useState(true);
@@ -1845,6 +1972,12 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, current
       setPan({ x: rect.width / 2 - 380, y: rect.height / 2 - 220 });
     }
   }, [showSummary]);
+
+  useEffect(() => {
+    setMessages(initialRagChatMessages(ragDocuments));
+    setChatInput("");
+    setChatError(null);
+  }, [ragDocumentKey]);
 
   // Split panel drag
   useEffect(() => {
@@ -1906,14 +2039,29 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, current
     setSelected(prev => prev?.id === node.id ? null : node);
   };
 
-  const handleSend = () => {
-    if (!chatInput.trim()) return;
-    const q = chatInput;
+  const handleSend = async () => {
+    const q = chatInput.trim();
+    if (!q || asking) return;
+    if (ragDocuments.length === 0) {
+      setChatError("Chưa có tài liệu đã xử lý để chatbot tra cứu.");
+      return;
+    }
     setMessages(prev => [...prev, { role: "user", text: q }]);
     setChatInput("");
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: "assistant", text: `Theo phân tích NĐ 15/2021/NĐ-CP, nội dung liên quan đến "${q.slice(0, 30)}..." được quy định tại Chương II, Điều 5. Bạn có muốn xem chi tiết không?` }]);
-    }, 700);
+    setAsking(true);
+    setChatError(null);
+    try {
+      const result = await queryDocumentRag(q, ragDocumentIds);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        text: result.answer || "Tôi chưa tìm thấy nội dung phù hợp trong các tài liệu đã xử lý.",
+        sources: result.sources,
+      }]);
+    } catch (reason) {
+      setChatError(reason instanceof Error ? reason.message : "Không thể nhận câu trả lời từ chatbot.");
+    } finally {
+      setAsking(false);
+    }
   };
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -1934,13 +2082,13 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, current
     {
       key: "thucTrang", icon: Layers, color: "text-blue-600", bg: "bg-blue-50", activeBorder: "border-blue-400",
       title: "Thực trạng",
-      subtitle: `Dựa trên Báo cáo thực trạng${user.baoCaoFile ? ` — ${user.baoCaoFile}` : ""}`,
+      subtitle: `Dựa trên Báo cáo thực trạng${user.baoCaoFile ? ` — ${user.baoCaoFile.name}` : ""}`,
       content: `${user.tinh} hiện có 47 dự án đầu tư xây dựng đang triển khai, trong đó 23 dự án sử dụng vốn đầu tư công. Tình trạng chậm tiến độ xảy ra ở 38% dự án, chủ yếu do:\n\n• Phân cấp thẩm quyền quyết định đầu tư còn chồng chéo giữa UBND xã và huyện\n• Thiếu cán bộ kỹ thuật chuyên ngành tại cấp ${user.xa || "xã"}\n• Quy trình nghiệm thu, bàn giao còn kéo dài do thiếu nhân lực kiểm tra\n• 12 dự án nhóm B cần làm rõ thẩm quyền phê duyệt theo quy định mới`,
     },
     {
       key: "mucTieu", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50", activeBorder: "border-emerald-400",
       title: "Mục tiêu",
-      subtitle: `Từ văn bản hành chính${user.vanBanFile ? ` — ${user.vanBanFile}` : " — NĐ 15/2021/NĐ-CP"}`,
+      subtitle: `Từ văn bản hành chính${user.vanBanFile ? ` — ${user.vanBanFile.name}` : " — NĐ 15/2021/NĐ-CP"}`,
       content: `Nghị định 15/2021/NĐ-CP hướng đến:\n\n• Nâng cao hiệu quả quản lý nhà nước về đầu tư xây dựng sử dụng vốn công\n• Phân định rõ trách nhiệm giữa chủ đầu tư, ban QLDA và các bên liên quan\n• Rút ngắn thủ tục hành chính 30–40% so với Nghị định 59/2015\n• Tăng cường phân cấp cho địa phương (UBND cấp tỉnh, huyện) trong phê duyệt dự án nhóm B, C\n• Đảm bảo minh bạch trong đấu thầu và nghiệm thu công trình`,
     },
     {
@@ -1974,7 +2122,7 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, current
           <FileText className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
           <span className="text-sm font-bold text-gray-900 truncate">Phân tích tài liệu</span>
           <span className="text-gray-300 mx-1">·</span>
-          <span className="text-xs text-gray-500 truncate">{user.vanBanFile ?? "NĐ 15/2021/NĐ-CP"}</span>
+          <span className="text-xs text-gray-500 truncate">{user.vanBanFile?.name ?? ragDocuments[0]?.title ?? "Tài liệu đã xử lý"}</span>
         </div>
         <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors mr-1">
           <Download className="w-3.5 h-3.5" />Xuất báo cáo
@@ -2049,7 +2197,7 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, current
               <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-2.5 flex items-center gap-2 z-10 shadow-sm">
                 <Eye className="w-3.5 h-3.5 text-gray-400" />
                 <span className="text-xs font-semibold text-gray-700">Văn bản gốc</span>
-                <span className="ml-auto text-[10px] text-gray-400 truncate max-w-[140px]">{user.vanBanFile ?? "NĐ 15/2021/NĐ-CP"}</span>
+                <span className="ml-auto text-[10px] text-gray-400 truncate max-w-[140px]">{user.vanBanFile?.name ?? ragDocuments[0]?.title ?? "Tài liệu đã xử lý"}</span>
               </div>
               <div className="p-5 text-xs text-gray-800 leading-relaxed space-y-4" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
                 {DOCUMENT_SECTIONS.map(sec => {
@@ -2153,17 +2301,36 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport, current
                 {messages.map((msg, i) => (
                   <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div className={`max-w-[88%] px-3 py-2 rounded-xl text-[11px] leading-relaxed ${msg.role === "user" ? "bg-[#C41E3A] text-white rounded-br-sm" : "bg-white text-gray-700 border border-gray-100 shadow-sm rounded-bl-sm"}`}>
-                      {msg.text}
+                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-2 space-y-1.5 border-t border-gray-100 pt-2">
+                          {msg.sources.map(source => (
+                            <div key={source.chunk_id} className="text-[9px] leading-4 text-gray-500">
+                              <p className="font-bold text-gray-600">{source.document_title}{source.page_number ? ` · Trang ${source.page_number}` : ""}</p>
+                              <p className="line-clamp-2">{source.quote}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
+                {asking && (
+                  <div className="flex justify-start">
+                    <div className="flex items-center gap-1.5 rounded-xl rounded-bl-sm border border-gray-100 bg-white px-3 py-2 text-[10px] text-gray-500 shadow-sm">
+                      <Loader2 className="h-3 w-3 animate-spin" />Đang tìm trong tài liệu...
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
+              {chatError && <div className="border-t border-red-100 bg-red-50 px-3 py-2 text-[10px] text-red-600">{chatError}</div>}
               <div className="border-t border-gray-100 p-2.5 flex gap-2 bg-white">
-                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSend()}
-                  placeholder="Hỏi về nội dung tài liệu..."
+                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void handleSend(); } }}
+                  disabled={asking || ragDocuments.length === 0}
+                  placeholder={ragDocuments.length > 0 ? "Hỏi về nội dung tài liệu..." : "Chưa có tài liệu đã xử lý"}
                   className="flex-1 px-3 py-1.5 text-[11px] bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-[#C41E3A] transition-colors" />
-                <button onClick={handleSend} className="p-2 bg-[#C41E3A] rounded-lg text-white hover:bg-[#a8172f] transition-colors flex-shrink-0"><Send className="w-3 h-3" /></button>
+                <button type="button" title="Gửi câu hỏi" onClick={() => void handleSend()} disabled={asking || !chatInput.trim() || ragDocuments.length === 0} className="p-2 bg-[#C41E3A] rounded-lg text-white hover:bg-[#a8172f] disabled:opacity-50 transition-colors flex-shrink-0">{asking ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}</button>
               </div>
             </div>
           ) : (
@@ -2318,23 +2485,98 @@ export default function UserPortal({ currentUser, onLogout }: {
   const [showImport, setShowImport] = useState(false);
   const [importData, setImportData] = useState<ImportData | null>(null);
   const [documents, setDocuments] = useState<DocumentPublic[]>([]);
-  const [documentsLoading, setDocumentsLoading] = useState(true);
-  const [documentsError, setDocumentsError] = useState("");
-
-  async function refreshDocuments() {
-    setDocumentsLoading(true); setDocumentsError("");
-    try { setDocuments(await listDocuments()); }
-    catch (reason) { setDocumentsError(reason instanceof Error ? reason.message : "Không thể tải tài liệu."); }
-    finally { setDocumentsLoading(false); }
-  }
-  useEffect(() => { void refreshDocuments(); }, []);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [analysisDocumentIds, setAnalysisDocumentIds] = useState<string[]>([]);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const navigate = (s: Screen) => setScreen(s);
-  const handleImportSubmit = (data: ImportData) => { setImportData(data); setScreen("processing"); };
+  const loadBackendDocuments = async () => {
+    try {
+      setDocuments(await listDocuments());
+      setDataError(null);
+    } catch (reason) {
+      setDataError(reason instanceof Error ? reason.message : "Không thể tải danh sách tài liệu.");
+    }
+  };
+  const handleImportSubmit = (data: ImportData) => {
+    const files = [data.baoCaoFile, data.vanBanFile].filter((file): file is File => file !== null);
+    if (files.length === 0) return;
+    setImportData(data);
+    setAnalysisDocumentIds([]);
+    setAnalysisError(null);
+    setScreen("processing");
+
+    void (async () => {
+      const analysisIds: string[] = [];
+      try {
+        for (const file of files) {
+          let documentId: string;
+          try {
+            documentId = (await uploadDocument(file)).document_id;
+          } catch (reason) {
+            const existingDocumentId = duplicateDocumentId(reason);
+            if (!existingDocumentId) throw reason;
+            documentId = existingDocumentId;
+            const existingDocument = (await listDocuments()).find(
+              document => document.id === existingDocumentId,
+            );
+            if (existingDocument && ["FAILED", "CANCELLED"].includes(existingDocument.status)) {
+              documentId = (await reprocessDocument(existingDocumentId)).document_id;
+            }
+          }
+          if (!analysisIds.includes(documentId)) analysisIds.push(documentId);
+        }
+        const latestDocuments = await listDocuments();
+        setDocuments(latestDocuments);
+        setAnalysisDocumentIds([...analysisIds]);
+        setDataError(null);
+      } catch (reason) {
+        setAnalysisError(reason instanceof Error ? reason.message : "Không thể tải tài liệu lên máy chủ.");
+      }
+    })();
+  };
+
+  useEffect(() => {
+    void loadBackendDocuments();
+  }, []);
+
+  useEffect(() => {
+    const hasPendingDocument = documents.some(document =>
+      ["UPLOADED", "QUEUED", "PROCESSING"].includes(document.status),
+    );
+    if (!hasPendingDocument) return;
+    const timer = window.setInterval(() => void loadBackendDocuments(), 5000);
+    return () => window.clearInterval(timer);
+  }, [documents]);
+
+  const analysisDocuments = analysisDocumentIds
+    .map(documentId => documents.find(document => document.id === documentId))
+    .filter((document): document is DocumentPublic => document !== undefined);
+
+  useEffect(() => {
+    if (screen !== "processing" || analysisDocumentIds.length === 0 || analysisError) return;
+    if (analysisDocuments.some(document => ["FAILED", "CANCELLED"].includes(document.status))) {
+      setAnalysisError("Backend không thể xử lý một hoặc nhiều tài liệu đã tải lên.");
+      return;
+    }
+    if (
+      analysisDocuments.length === analysisDocumentIds.length &&
+      analysisDocuments.every(document => ["COMPLETED", "NEEDS_REVIEW"].includes(document.status))
+    ) {
+      setScreen("tree");
+    }
+  }, [analysisDocumentIds, analysisDocuments, analysisError, screen]);
 
   if (screen === "tree") return <>
-    <WhiteboardScreen onNavigate={navigate} importData={importData} onProfile={() => setShowProfile(true)}
-      onImport={() => setShowImport(true)} currentUser={currentUser} onLogout={onLogout} />
+    <WhiteboardScreen
+      onNavigate={navigate}
+      importData={importData}
+      ragDocuments={analysisDocuments}
+      onProfile={() => setShowProfile(true)}
+      onImport={() => setShowImport(true)}
+      currentUser={currentUser}
+      onLogout={onLogout}
+    />
     {showProfile && <ProfileModal currentUser={currentUser} onClose={() => setShowProfile(false)} onPasswordChanged={() => void onLogout()} />}
     {showImport && <ImportModal onClose={() => setShowImport(false)} onSubmit={handleImportSubmit} currentUser={currentUser} />}
   </>;
@@ -2344,15 +2586,30 @@ export default function UserPortal({ currentUser, onLogout }: {
       <MainLayout active="dashboard" title="Đang xử lý tài liệu" onNavigate={navigate} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onProfile={() => setShowProfile(true)} onImport={() => setShowImport(true)} currentUser={currentUser} documents={documents} onLogout={onLogout}>
         <div className="h-96 flex items-center justify-center"><p className="text-gray-400 text-sm">Đang phân tích...</p></div>
       </MainLayout>
-      <ProcessingScreen onComplete={() => setScreen("tree")} />
+      <ProcessingScreen
+        documents={analysisDocuments}
+        fileNames={[importData?.baoCaoFile?.name, importData?.vanBanFile?.name].filter((name): name is string => Boolean(name))}
+        error={analysisError}
+        onBack={() => { setAnalysisError(null); setAnalysisDocumentIds([]); setScreen("dashboard"); }}
+      />
     </>
   );
 
   return (
     <>
       <MainLayout active={screen} title={TITLES[screen]} onNavigate={navigate} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onProfile={() => setShowProfile(true)} onImport={() => setShowImport(true)} currentUser={currentUser} documents={documents} onLogout={onLogout}>
-        {screen === "dashboard" && <DashboardScreen onNavigate={navigate} documents={documents} documentsLoading={documentsLoading} documentsError={documentsError} />}
-        {screen === "documents" && <MyDocumentsScreen documents={documents} loading={documentsLoading} error={documentsError} onRefresh={() => void refreshDocuments()} />}
+        {dataError && <div className="mb-5 flex items-start justify-between gap-3 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700"><span className="flex items-start gap-2"><AlertCircle className="h-4 w-4 flex-shrink-0" />{dataError}</span><button onClick={() => void loadBackendDocuments()} className="font-bold hover:underline">Thử lại</button></div>}
+        {screen === "dashboard" && <DashboardScreen documentCount={documents.length} onNavigate={navigate} onAnalyze={(baoCaoFile, vanBanFile) => handleImportSubmit({
+          ten: currentUser.full_name,
+          chucVu: currentUser.position ?? "",
+          phongBan: currentUser.department ?? "",
+          thon: "",
+          xa: "",
+          tinh: "",
+          baoCaoFile,
+          vanBanFile,
+        })} />}
+        {screen === "documents" && <MyDocumentsScreen documents={documents} onReload={loadBackendDocuments} />}
         {screen === "library" && <LegalLibraryScreen onNavigate={navigate} />}
         {screen === "notebook" && <KnowledgeNotebookScreen />}
       </MainLayout>

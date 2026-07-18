@@ -66,6 +66,30 @@ export interface DocumentPublic {
   updated_at: string;
 }
 
+export interface DocumentUploadResult {
+  document_id: string;
+  workspace_id: string;
+  status: ProcessingStatus;
+  progress: number;
+}
+
+export interface RagSource {
+  document_id: string;
+  document_title: string;
+  chunk_id: string;
+  page_number: number | null;
+  article: string | null;
+  clause: string | null;
+  quote: string;
+  score: number;
+}
+
+export interface RagQueryResult {
+  answer: string;
+  retrieval_mode: string;
+  sources: RagSource[];
+}
+
 interface ErrorEnvelope {
   error?: {
     code?: string;
@@ -257,6 +281,35 @@ export function createAdminUser(input: AdminUserCreateInput): Promise<UserPublic
 export function setAdminUserActive(userId: string, active: boolean): Promise<UserPublic> {
   return request<UserPublic>(`/admin/users/${encodeURIComponent(userId)}/${active ? "unlock" : "lock"}`, {
     method: "PATCH",
+  });
+}
+
+export function uploadDocument(file: File): Promise<DocumentUploadResult> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<DocumentUploadResult>("/documents", {
+    method: "POST",
+    body,
+  });
+}
+
+export function reprocessDocument(documentId: string): Promise<DocumentUploadResult> {
+  return request<DocumentUploadResult>(`/documents/${encodeURIComponent(documentId)}/reprocess`, {
+    method: "POST",
+  });
+}
+
+export function queryDocumentRag(
+  question: string,
+  documentIds: string[],
+): Promise<RagQueryResult> {
+  return request<RagQueryResult>("/rag/query", {
+    method: "POST",
+    body: JSON.stringify({
+      question,
+      document_ids: documentIds,
+      top_k: 5,
+    }),
   });
 }
 

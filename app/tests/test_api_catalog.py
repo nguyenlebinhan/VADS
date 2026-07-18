@@ -1,5 +1,17 @@
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+
+from app.api.v1.router import SECURE_V1_ROUTERS
+
+
+def test_secure_v1_router_contains_dispatchable_routes() -> None:
+    assert SECURE_V1_ROUTERS
+    assert all(
+        isinstance(route, APIRoute)
+        for router in SECURE_V1_ROUTERS
+        for route in router.routes
+    )
 
 
 def test_openapi_exposes_complete_product_api(application: FastAPI) -> None:
@@ -27,6 +39,11 @@ def test_openapi_exposes_complete_product_api(application: FastAPI) -> None:
         ("/api/agent-runs/{runId}/retry", "post"),
         ("/api/users/me/context", "get"),
         ("/api/users/me/context", "put"),
+        ("/api/docx-rag/query", "post"),
+        ("/api/docx-rag/queries/{query_id}/sources", "get"),
+        ("/api/v1/documents", "post"),
+        ("/api/v1/documents/{document_id}/reprocess", "post"),
+        ("/api/v1/rag/query", "post"),
     }
 
     for path, method in expected_operations:
@@ -46,9 +63,9 @@ def test_openapi_exposes_complete_product_api(application: FastAPI) -> None:
     )
 
     # Compatibility-mode tests expose the 49 consolidated legacy/health
-    # operations alongside the 19 tenant-scoped v1 operations.
-    assert secure_operation_count == 19
-    assert operation_count == 68
+    # operations, 22 tenant-scoped v1 operations, and 2 DOCX RAG operations.
+    assert secure_operation_count == 22
+    assert operation_count == 73
 
 
 def test_product_routes_use_unique_operation_ids(application: FastAPI) -> None:

@@ -5,11 +5,13 @@ from sqlalchemy import select
 from app.common.contracts import BoundingBox
 from app.extraction.ocr import MockOcrProvider
 from app.extraction.schemas import OcrBlock, OcrPageResult
+from app.model.chunking import DocumentChunk
 from app.model.documents import Document
+from app.model.extraction import DocumentTable, PageBlock
 from app.model.processing import ProcessingJob, ProcessingStatus, ProcessingStep
 from app.processing.pipeline import DocumentProcessingPipeline
 from app.service.processing import ProcessingStateService
-from app.tests.helpers import pdf_with_pages
+from app.tests.helpers import docx_with_table, pdf_with_pages
 
 
 def test_pipeline_persists_ocr_bbox_pages_and_chunks(
@@ -94,3 +96,55 @@ def test_pipeline_persists_ocr_bbox_pages_and_chunks(
         document = session.get(Document, document_id)
         assert document is not None
         assert document.document_type.value == "SCANNED"
+
+
+def test_pipeline_persists_docx_tables_blocks_and_chunks(
+    client: TestClient,
+    application: FastAPI,
+    workspace_id: str,
+) -> None:
+    upload = client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={
+            "file": (
+                "van-ban.docx",
+                docx_with_table(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert upload.status_code == 201
+    document_id = upload.json()["data"]["documentId"]
+
+    with application.state.session_factory() as session:
+        job = session.scalar(select(ProcessingJob).where(ProcessingJob.document_id == document_id))
+        assert job is not None
+        ProcessingStateService(session).transition(
+            job.id,
+            status=ProcessingStatus.QUEUED,
+            progress=0,
+            current_step=ProcessingStep.VALIDATING_FILE,
+        )
+        DocumentProcessingPipeline(
+            session,
+            storage=application.state.fake_storage,
+            ocr_provider=MockOcrProvider({}),
+            settings=application.state.settings,
+        ).run(job.id)
+
+    status = client.get(f"/api/documents/{document_id}/status").json()["data"]
+    assert status["status"] == "COMPLETED"
+
+    with application.state.session_factory() as session:
+        document = session.get(Document, document_id)
+        assert document is not None
+        assert document.document_type.value == "DOCX"
+        assert session.scalar(select(PageBlock).where(PageBlock.document_id == document_id)) is not None
+        assert (
+            session.scalar(select(DocumentTable).where(DocumentTable.document_id == document_id))
+            is not None
+        )
+        assert (
+            session.scalar(select(DocumentChunk).where(DocumentChunk.document_id == document_id))
+            is not None
+        )

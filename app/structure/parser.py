@@ -19,6 +19,8 @@ class HeadingMatch:
 class LegalStructureParser:
     """Vietnamese legal-document parser using deterministic rules before AI."""
 
+    MAX_LABEL_LENGTH = 255
+
     _chapter = re.compile(r"^\s*CHƯƠNG\s+([IVXLCDM]+|\d+)\s*[.\-:]?\s*(.*)$", re.IGNORECASE)
     _section = re.compile(r"^\s*MỤC\s+(\d+[A-Z]?)\s*[.\-:]?\s*(.*)$", re.IGNORECASE)
     _article = re.compile(r"^\s*ĐIỀU\s+(\d+[A-Z]?)\s*[.]?\s*(.*)$", re.IGNORECASE)
@@ -103,12 +105,13 @@ class LegalStructureParser:
                 del active_by_level[level]
             parent = self._nearest_parent(active_by_level, match.level)
             section_id = str(uuid4())
+            label = self._fit_label(match.label)
             heading_path = [] if parent is None else [*parent.heading_path]
             heading_path.append(
                 {
                     "id": section_id,
                     "sectionType": match.section_type.value,
-                    "label": match.label,
+                    "label": label,
                     "title": match.title,
                 }
             )
@@ -117,7 +120,7 @@ class LegalStructureParser:
                 document_id=document_id,
                 parent_id=parent.id if parent else None,
                 section_type=match.section_type,
-                label=match.label,
+                label=label,
                 title=match.title,
                 content=text,
                 hierarchy_level=match.level,
@@ -230,3 +233,9 @@ class LegalStructureParser:
             and len(text) <= 250
             and all(not character.islower() for character in letters)
         )
+
+    @classmethod
+    def _fit_label(cls, value: str | None) -> str | None:
+        if value is None or len(value) <= cls.MAX_LABEL_LENGTH:
+            return value
+        return value[: cls.MAX_LABEL_LENGTH - 3].rstrip() + "..."
