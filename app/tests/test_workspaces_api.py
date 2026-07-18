@@ -1,6 +1,22 @@
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
+
+from app.config.settings import Settings
+from app.main import create_app
+
+
+def test_app_factory_bootstraps_model_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    test_settings: Settings,
+) -> None:
+    calls: list[bool] = []
+    monkeypatch.setattr("app.main.import_models", lambda: calls.append(True))
+
+    create_app(test_settings)
+
+    assert calls == [True]
 
 
 def test_create_workspace_returns_camel_case_contract(client: TestClient) -> None:

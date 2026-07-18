@@ -1,5 +1,7 @@
+import pytest
+
 from app.common.contracts import BoundingBox
-from app.extraction.ocr import MockOcrProvider
+from app.extraction.ocr import MockOcrProvider, PaddleOcrProvider
 from app.extraction.pdf import PdfClassifier
 from app.extraction.schemas import OcrBlock, OcrPageResult
 from app.model.documents import DocumentType
@@ -64,3 +66,33 @@ def test_ocr_page_and_region_are_deterministic() -> None:
     assert full.blocks[0].bbox.x1 == 110
     assert region.text == page_result.text
     assert provider.health_check().healthy is True
+
+
+def test_paddle_ocr_v3_prediction_is_mapped_to_contract() -> None:
+    class Prediction:
+        json = {
+            "res": {
+                "rec_texts": ["Điều 1. Phạm vi điều chỉnh", "Khoản 1"],
+                "rec_scores": [0.98, 0.91],
+                "rec_boxes": [[110, 202, 810, 245], [120, 260, 300, 295]],
+            }
+        }
+
+    class Engine:
+        def predict(self, image):
+            assert image == "decoded-image"
+            return [Prediction()]
+
+    provider = PaddleOcrProvider(
+        engine=Engine(),
+        image_decoder=lambda image: "decoded-image",
+    )
+
+    result = provider.recognize_page(b"png", page_index=4)
+
+    assert result.page_index == 4
+    assert result.text == "Điều 1. Phạm vi điều chỉnh\nKhoản 1"
+    assert result.average_confidence == pytest.approx(0.945)
+    assert result.blocks[0].bbox == BoundingBox(x1=110, y1=202, x2=810, y2=245)
+    assert result.blocks[1].order_index == 1
+    assert result.metadata["ocrVersion"] == "PP-OCRv3"

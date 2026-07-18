@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     chunk_max_tokens: int = Field(default=800, ge=100, le=4_000)
     chunk_overlap_tokens: int = Field(default=75, ge=0, le=500)
 
+    fpt_ai_enabled: bool = False
+    fpt_ai_api_key: SecretStr | None = None
+    fpt_ai_base_url: str = "https://mkp-api.fptcloud.com"
+    fpt_ai_chat_completions_path: str = "/v1/chat/completions"
+    fpt_ai_models_path: str = "/v1/models"
+    fpt_ai_model_map: dict[str, str] = Field(default_factory=dict)
+    fpt_ai_max_tokens: int = Field(default=4096, ge=1, le=131_072)
+    fpt_ai_temperature: float = Field(default=0, ge=0, le=2)
+    fpt_ai_allow_private_data: bool = False
+
     cors_origins: list[str]
 
     @property

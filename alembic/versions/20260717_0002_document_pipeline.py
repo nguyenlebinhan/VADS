@@ -103,7 +103,7 @@ def upgrade() -> None:
     op.create_index("ix_workspace_members_workspace_id", "workspace_members", ["workspace_id"])
     op.create_index("ix_workspace_members_user_id", "workspace_members", ["user_id"])
 
-    with op.batch_alter_table("documents", recreate="always") as batch_op:
+    with op.batch_alter_table("documents") as batch_op:
         batch_op.drop_constraint("document_processing_status", type_="check")
         batch_op.alter_column(
             "status", existing_type=sa.String(length=10), type_=sa.String(length=20)
@@ -126,7 +126,7 @@ def upgrade() -> None:
 
     # Batch mode makes the constraint/column migration portable to SQLite test
     # databases while emitting normal ALTER statements on PostgreSQL.
-    with op.batch_alter_table("processing_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("processing_jobs") as batch_op:
         batch_op.drop_constraint("uq_processing_job_document_type", type_="unique")
         batch_op.drop_constraint("processing_step", type_="check")
         batch_op.drop_constraint("processing_status", type_="check")
@@ -148,7 +148,7 @@ def upgrade() -> None:
         "WHEN current_step = 'DETECTING_PAGE_BOUNDARIES' THEN 'RENDERING_PAGES' "
         "ELSE current_step END"
     )
-    with op.batch_alter_table("processing_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("processing_jobs") as batch_op:
         batch_op.create_check_constraint(
             "processing_step", _enum_check("current_step", PROCESSING_STEPS)
         )
@@ -381,7 +381,7 @@ def downgrade() -> None:
     op.drop_table("document_sections")
     op.drop_table("page_blocks")
     op.drop_table("document_pages")
-    with op.batch_alter_table("processing_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("processing_jobs") as batch_op:
         batch_op.drop_constraint("uq_processing_job_document_type_attempt", type_="unique")
         batch_op.drop_constraint("processing_status", type_="check")
         batch_op.drop_constraint("processing_step", type_="check")
@@ -404,7 +404,7 @@ def downgrade() -> None:
         "INDEXING_VECTOR_DATA",
         "COMPLETED",
     )
-    with op.batch_alter_table("processing_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("processing_jobs") as batch_op:
         batch_op.create_check_constraint("processing_step", _enum_check("current_step", old_steps))
         batch_op.create_check_constraint("processing_status", _enum_check("status", old_statuses))
         batch_op.drop_column("message")
@@ -419,7 +419,7 @@ def downgrade() -> None:
         )
     op.drop_index("ix_documents_document_type", table_name="documents")
     op.execute("UPDATE documents SET status = 'FAILED' WHERE status = 'NEEDS_REVIEW'")
-    with op.batch_alter_table("documents", recreate="always") as batch_op:
+    with op.batch_alter_table("documents") as batch_op:
         batch_op.drop_constraint("document_processing_status", type_="check")
         batch_op.drop_constraint("document_type", type_="check")
         batch_op.drop_column("document_type")

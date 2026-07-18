@@ -13,7 +13,7 @@ from app.knowledge_graph.reader import SqlAlchemyKnowledgeGraphReader
 from app.knowledge_graph.schemas import KnowledgeGraphGenerationResult, KnowledgeGraphView
 from app.knowledge_graph.service import KnowledgeGraphService
 from app.model.documents import Document
-from app.model_gateway.gateway import ModelGateway
+from app.model_gateway.gateway import MetadataModelGateway, ModelGateway
 from app.orchestrator.dependencies import (
     build_citation_validator,
     get_execution_planner,
@@ -51,6 +51,10 @@ def _ensure_document(session: Session, document_id: str) -> Document:
     return document
 
 
+def _request_gateway(gateway: ModelGateway, *, private: bool) -> ModelGateway:
+    return MetadataModelGateway(gateway, {"private": private})
+
+
 @router.post(
     "/documents/{document_id}/analysis",
     response_model=ApiSuccessResponse[DocumentAnalysisResult],
@@ -64,16 +68,17 @@ def analyze_document(
     body: GenerationRequest | None = None,
 ) -> ApiSuccessResponse[DocumentAnalysisResult]:
     _ensure_document(session, document_id)
+    private = body.private_processing if body else False
     chunk_reader = SqlAlchemyDocumentChunkReader(session)
     result = DocumentAnalysisOrchestrator(
         session,
-        gateway=gateway,
+        gateway=_request_gateway(gateway, private=private),
         planner=planner,
         chunk_reader=chunk_reader,
         citation_validator=build_citation_validator(session),
     ).analyze(
         document_id,
-        private=body.private_processing if body else False,
+        private=private,
     )
     return ApiSuccessResponse(data=result, message="Document analysis workflow executed")
 
@@ -105,16 +110,17 @@ def generate_summary(
     body: GenerationRequest | None = None,
 ) -> ApiSuccessResponse[SummaryGenerationResult]:
     _ensure_document(session, document_id)
+    private = body.private_processing if body else False
     reader = SqlAlchemyDocumentChunkReader(session)
     result = SummaryService(
         session,
-        gateway=gateway,
+        gateway=_request_gateway(gateway, private=private),
         planner=planner,
         chunk_reader=reader,
         citation_validator=build_citation_validator(session),
     ).generate(
         document_id,
-        private=body.private_processing if body else False,
+        private=private,
     )
     return ApiSuccessResponse(data=result, message="Summary generation workflow executed")
 
@@ -163,7 +169,7 @@ def generate_knowledge_graph(
     private = body.private_processing if body else False
     result = KnowledgeGraphService(
         session,
-        gateway=gateway,
+        gateway=_request_gateway(gateway, private=private),
         planner=planner,
         chunk_reader=reader,
         citation_validator=validator,
@@ -171,7 +177,7 @@ def generate_knowledge_graph(
     if result.graph is not None:
         RedFlagService(
             session,
-            gateway=gateway,
+            gateway=_request_gateway(gateway, private=private),
             planner=planner,
             citation_validator=validator,
         ).evaluate(
@@ -228,16 +234,17 @@ def generate_critical_questions(
     body: GenerationRequest | None = None,
 ) -> ApiSuccessResponse[CriticalQuestionGenerationResult]:
     _ensure_document(session, document_id)
+    private = body.private_processing if body else False
     reader = SqlAlchemyDocumentChunkReader(session)
     result = CriticalQuestionService(
         session,
-        gateway=gateway,
+        gateway=_request_gateway(gateway, private=private),
         planner=planner,
         chunk_reader=reader,
         citation_validator=build_citation_validator(session),
     ).generate(
         document_id,
-        private=body.private_processing if body else False,
+        private=private,
     )
     return ApiSuccessResponse(data=result, message="Critical questions workflow executed")
 

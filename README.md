@@ -63,8 +63,18 @@ celery -A app.config.celery_app:celery_app worker --loglevel=INFO
 celery -A app.config.celery_app:celery_app beat --loglevel=INFO
 ```
 
-Mặc định local dùng `VADS_OCR_PROVIDER=MOCK`. Để OCR scan thật, cài PaddleOCR runtime và
-đặt `VADS_OCR_PROVIDER=PADDLEOCR`. Không dùng vision LLM làm OCR engine chính.
+Docker Compose cài PaddlePaddle CPU và PaddleOCR 3.x riêng trong image `worker`; image
+`api` và `beat` không mang runtime OCR nặng. `VADS_OCR_PROVIDER=PADDLEOCR` được bật trong
+`.env.example`. Lần chạy đầu worker sẽ tải model tiếng Việt PP-OCRv3, sau đó OCR chỉ các
+trang scan/image-only. Khi chạy trực tiếp ngoài Docker, cài runtime bằng các lệnh:
+
+```bash
+python -m pip install paddlepaddle==3.2.0 \
+  --index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
+python -m pip install -e ".[ocr]"
+```
+
+Không dùng vision LLM làm OCR engine chính.
 
 ## API
 
@@ -180,4 +190,22 @@ GET  /api/documents/{documentId}/knowledge-graph
 GET  /api/documents/{documentId}/red-flags
 POST /api/documents/{documentId}/critical-questions/generate
 GET  /api/documents/{documentId}/critical-questions
+```
+
+### FPT AI Inference
+
+AI orchestration và phần sinh câu trả lời Chat dùng chung `FptAiModelGateway`. Cấu hình khóa trong
+`.env` cục bộ hoặc secret manager bằng `VADS_FPT_AI_API_KEY`; không ghi khóa thật vào source hay
+`.env.example`. Endpoint mặc định là `https://mkp-api.fptcloud.com` và không cần cài OpenAI SDK.
+
+```dotenv
+VADS_FPT_AI_ENABLED=true
+VADS_FPT_AI_API_KEY=<fpt-ai-marketplace-key>
+VADS_FPT_AI_MODEL_MAP={}
+```
+
+Chạy health check theo alias:
+
+```bash
+python -c "from app.config.settings import Settings; from app.model_gateway.fpt_ai import build_fpt_ai_gateway; print(build_fpt_ai_gateway(Settings()).health_check('GLM-5.2'))"
 ```

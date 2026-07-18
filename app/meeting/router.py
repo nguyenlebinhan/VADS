@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Path, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.chat.adapters.mock.model_router import MockModelRouter
+from app.chat.adapters.model_gateway import ModelGatewayChatAdapter
 from app.chat.qa_pipeline import QuestionAnsweringPipeline
 from app.chat.service import ChatService
 from app.common.contracts import ApiSuccessResponse
@@ -11,6 +11,8 @@ from app.config.database import get_db
 from app.meeting.adapters.mock.transcriber import MockMeetingTranscriber
 from app.meeting.schemas import MeetingSessionCreate, MeetingSessionData, MeetingTranscriptData
 from app.meeting.service import MeetingService
+from app.model_gateway.gateway import ModelGateway
+from app.orchestrator.dependencies import get_model_gateway
 from app.reranking.adapters.mock.provider import LexicalRerankerProvider
 from app.reranking.service import RerankingService
 from app.retrieval.service import HybridRetrievalService
@@ -20,14 +22,17 @@ from app.vector_store.pgvector_store import PgVectorStore
 router = APIRouter(tags=["Meeting Audio"])
 
 
-def get_meeting_service(session: Annotated[Session, Depends(get_db)]) -> MeetingService:
+def get_meeting_service(
+    session: Annotated[Session, Depends(get_db)],
+    gateway: Annotated[ModelGateway, Depends(get_model_gateway)],
+) -> MeetingService:
     qa_pipeline = QuestionAnsweringPipeline(
         retrieval=HybridRetrievalService(
             vector_store=PgVectorStore(session),
             embedding_provider=DeterministicEmbeddingProvider(),
         ),
         reranking=RerankingService(LexicalRerankerProvider()),
-        model_router=MockModelRouter(),
+        model_router=ModelGatewayChatAdapter(gateway),
     )
     return MeetingService(
         session,

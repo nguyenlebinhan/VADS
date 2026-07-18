@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -7,6 +10,24 @@ from app.exceptions import AppError, InvalidStateTransitionError
 from app.model.processing import ProcessingJob, ProcessingStatus, ProcessingStep
 from app.service.processing import ProcessingStateService
 from app.tests.helpers import minimal_pdf
+
+
+def test_processing_tasks_bootstrap_all_mapper_relationships() -> None:
+    script = (
+        "from sqlalchemy.orm import configure_mappers; "
+        "from app.service.processing_tasks import redispatch_uploaded_jobs; "
+        "configure_mappers(); "
+        "assert redispatch_uploaded_jobs.name == "
+        "'vads.processing.redispatch_uploaded_jobs'"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_processing_state_machine_rejects_progress_regression(

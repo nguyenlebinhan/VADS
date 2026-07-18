@@ -37,9 +37,25 @@ không chứa alias hard-code.
 
 ## Model provider adapter
 
-`app.main` dùng `UnavailableModelGateway` an toàn khi deployment chưa cấu hình provider. Adapter
-thực tế phải implement bốn method của `ModelGateway`: `generate_text`, `generate_structured`,
-`analyze_image`, `health_check`. Có thể gắn adapter vào app lúc bootstrap:
+`app.main` tự khởi tạo `FptAiModelGateway` khi `VADS_FPT_AI_ENABLED=true` và có
+`VADS_FPT_AI_API_KEY`. Adapter gọi trực tiếp FPT AI Marketplace qua HTTPS; dự án không phụ thuộc
+SDK hoặc dịch vụ OpenAI. FPT dùng giao thức HTTP tương thích OpenAI tại adapter boundary, trong
+khi business module chỉ làm việc với alias VADS và `ModelGateway`.
+
+```dotenv
+VADS_FPT_AI_ENABLED=true
+VADS_FPT_AI_API_KEY=<store-in-local-env-or-secret-manager>
+VADS_FPT_AI_BASE_URL=https://mkp-api.fptcloud.com
+VADS_FPT_AI_MODEL_MAP={}
+VADS_FPT_AI_ALLOW_PRIVATE_DATA=false
+```
+
+Catalog hiện tại của FPT cung cấp trực tiếp các alias VADS nên map mặc định rỗng. Deployment dùng
+model ID khác có thể override từng alias bằng `VADS_FPT_AI_MODEL_MAP`. Không bật
+`VADS_FPT_AI_ALLOW_PRIVATE_DATA` cho endpoint công cộng; private processing sẽ fail closed.
+
+Khi chưa cấu hình khóa hoặc adapter bị tắt, `app.main` dùng `UnavailableModelGateway` an toàn.
+Vẫn có thể inject adapter khác cho test hoặc private deployment:
 
 ```python
 from app.main import create_app

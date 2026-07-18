@@ -139,7 +139,7 @@ def build_default_registry() -> ModelRegistry:
             "gpt-oss-120b",
             reasoning,
             cost=CostClass.HIGH,
-            fallbacks=["GLM-5.1"],
+            fallbacks=["Qwen3.6-27B", "Llama-3.3-70B-Instruct"],
             private=True,
         ),
         _model("GLM-5.1", reasoning, cost=CostClass.HIGH),

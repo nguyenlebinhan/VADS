@@ -215,3 +215,55 @@ class UnavailableModelGateway(ModelGateway):
     def health_check(self, model_alias: str) -> bool:
         del model_alias
         return False
+
+
+class MetadataModelGateway(ModelGateway):
+    """Adds immutable request metadata before delegating to a provider gateway."""
+
+    def __init__(self, gateway: ModelGateway, metadata: Mapping[str, Any]) -> None:
+        super().__init__(gateway.validator)
+        self.gateway = gateway
+        self.metadata = dict(metadata)
+
+    def generate_text(
+        self,
+        *,
+        model_alias: str,
+        prompt: str,
+        timeout_seconds: int = 90,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> ModelResponse:
+        return self.gateway.generate_text(
+            model_alias=model_alias,
+            prompt=prompt,
+            timeout_seconds=timeout_seconds,
+            metadata=self._merged(metadata),
+        )
+
+    def analyze_image(
+        self,
+        *,
+        model_alias: str,
+        prompt: str,
+        image: bytes,
+        mime_type: str,
+        timeout_seconds: int = 90,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> ModelResponse:
+        return self.gateway.analyze_image(
+            model_alias=model_alias,
+            prompt=prompt,
+            image=image,
+            mime_type=mime_type,
+            timeout_seconds=timeout_seconds,
+            metadata=self._merged(metadata),
+        )
+
+    def health_check(self, model_alias: str) -> bool:
+        return self.gateway.health_check(model_alias)
+
+    def _merged(self, metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+        merged = {**self.metadata, **dict(metadata or {})}
+        if self.metadata.get("private") is True:
+            merged["private"] = True
+        return merged

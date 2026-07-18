@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Path, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.chat.adapters.mock.model_router import MockModelRouter
+from app.chat.adapters.model_gateway import ModelGatewayChatAdapter
 from app.chat.qa_pipeline import QuestionAnsweringPipeline
 from app.chat.schemas import (
     ChatExchangeData,
@@ -17,6 +17,8 @@ from app.chat.schemas import (
 from app.chat.service import ChatService
 from app.common.contracts import ApiSuccessResponse
 from app.config.database import get_db
+from app.model_gateway.gateway import ModelGateway
+from app.orchestrator.dependencies import get_model_gateway
 from app.reranking.adapters.mock.provider import LexicalRerankerProvider
 from app.reranking.service import RerankingService
 from app.retrieval.service import HybridRetrievalService
@@ -27,7 +29,10 @@ from app.vector_store.pgvector_store import PgVectorStore
 router = APIRouter(tags=["Meeting Q&A"])
 
 
-def get_chat_service(session: Annotated[Session, Depends(get_db)]) -> ChatService:
+def get_chat_service(
+    session: Annotated[Session, Depends(get_db)],
+    gateway: Annotated[ModelGateway, Depends(get_model_gateway)],
+) -> ChatService:
     retrieval = HybridRetrievalService(
         vector_store=PgVectorStore(session),
         embedding_provider=DeterministicEmbeddingProvider(),
@@ -35,7 +40,7 @@ def get_chat_service(session: Annotated[Session, Depends(get_db)]) -> ChatServic
     pipeline = QuestionAnsweringPipeline(
         retrieval=retrieval,
         reranking=RerankingService(LexicalRerankerProvider()),
-        model_router=MockModelRouter(),
+        model_router=ModelGatewayChatAdapter(gateway),
     )
     return ChatService(session, qa_pipeline=pipeline)
 

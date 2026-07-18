@@ -5,12 +5,15 @@ from app.config.settings import Settings, get_settings
 from app.controller.common import router as common_router
 from app.documents.router import router as documents_router
 from app.exceptions.handlers import register_exception_handlers
+from app.model_gateway.fpt_ai import build_fpt_ai_gateway
 from app.orchestrator.router import router as ai_orchestration_router
 from app.utils.middleware import RequestContextMiddleware
+from app.utils.model_registry import import_models
 from app.workspaces.router import router as workspaces_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    import_models()
     app_settings = settings or get_settings()
     application = FastAPI(
         title=app_settings.app_name,
@@ -21,6 +24,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=f"{app_settings.api_prefix}/redoc",
     )
     application.state.settings = app_settings
+    application.state.model_gateway = build_fpt_ai_gateway(app_settings)
 
     application.add_middleware(
         CORSMiddleware,

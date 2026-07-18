@@ -141,11 +141,14 @@ def test_semantic_hybrid_metadata_filter_and_delete(db_session: Session) -> None
     assert hybrid[0].chunk_id == "chunk-1"
     assert hybrid[0].keyword_score > 0
     assert store.delete_document("document-1") == 1
-    assert store.similarity_search(
-        query_vector,
-        filters=VectorMetadataFilter(document_ids=("document-1",)),
-        limit=20,
-    ) == []
+    assert (
+        store.similarity_search(
+            query_vector,
+            filters=VectorMetadataFilter(document_ids=("document-1",)),
+            limit=20,
+        )
+        == []
+    )
 
 
 def test_retrieval_uses_top_20_or_top_40(db_session: Session) -> None:

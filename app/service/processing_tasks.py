@@ -20,7 +20,10 @@ from app.model.repositories.processing import ProcessingJobRepository
 from app.model.repositories.storage import DocumentFileRepository
 from app.processing.pipeline import DocumentProcessingPipeline
 from app.service.processing import ProcessingStateService
+from app.utils.model_registry import import_models
 from app.utils.storage_dependencies import get_object_storage
+
+import_models()
 
 logger = logging.getLogger(__name__)
 
