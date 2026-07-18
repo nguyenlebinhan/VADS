@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import {
   UserPlus,
   Users,
@@ -34,6 +34,18 @@ interface Account {
 }
 
 type Screen = "add" | "manage";
+
+const ADMIN_PATH_BY_SCREEN: Record<Screen, string> = {
+  add: "/admin/accounts/new",
+  manage: "/admin/accounts",
+};
+
+function adminScreenFromPath(pathname: string): Screen | null {
+  const normalized = pathname.endsWith("/") && pathname !== "/" ? pathname.slice(0, -1) : pathname;
+  if (normalized === ADMIN_PATH_BY_SCREEN.add) return "add";
+  if (normalized === ADMIN_PATH_BY_SCREEN.manage) return "manage";
+  return null;
+}
 
 // ─── Sample Data ─────────────────────────────────────────────────────────────
 
@@ -925,9 +937,21 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 // ─── App Shell ────────────────────────────────────────────────────────────────
 
 export default function AdminPortal({ currentUser, onLogout }: { currentUser: { full_name: string; email: string }; onLogout: () => void }) {
-  const [screen, setScreen] = useState<Screen>("add");
+  const [screen, setScreen] = useState<Screen>(() => adminScreenFromPath(window.location.pathname) ?? "add");
   const [accounts, setAccounts] = useState<Account[]>(SAMPLE_DATA);
   const [showChangePassword, setShowChangePassword] = useState(false);
+
+  useEffect(() => {
+    const handlePopState = () => setScreen(adminScreenFromPath(window.location.pathname) ?? "add");
+    window.addEventListener("popstate", handlePopState);
+    if (!adminScreenFromPath(window.location.pathname)) window.history.replaceState({}, "", ADMIN_PATH_BY_SCREEN.add);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  function navigate(nextScreen: Screen) {
+    window.history.pushState({}, "", ADMIN_PATH_BY_SCREEN[nextScreen]);
+    setScreen(nextScreen);
+  }
 
   function addAccount(acc: Account) {
     setAccounts((prev) => [...prev, acc]);
@@ -967,7 +991,7 @@ export default function AdminPortal({ currentUser, onLogout }: { currentUser: { 
             return (
               <button
                 key={id}
-                onClick={() => setScreen(id)}
+                onClick={() => navigate(id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                   active
                     ? "bg-[#cc1515] text-white shadow-md shadow-[#cc1515]/20"
@@ -1015,4 +1039,3 @@ export default function AdminPortal({ currentUser, onLogout }: { currentUser: { 
     </div>
   );
 }
-

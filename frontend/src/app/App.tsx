@@ -26,11 +26,49 @@ function Login({ onSuccess }: { onSuccess: (user: CurrentUser) => void }) {
 }
 
 export default function App() {
-  const [user, setUser] = useState<CurrentUser | null>(null); const [checking, setChecking] = useState(true);
-  useEffect(() => { if (!authApi.hasSession()) { setChecking(false); return; } authApi.me().then(setUser).catch(() => authApi.clear()).finally(() => setChecking(false)); }, []);
-  async function logout() { await authApi.logout(); setUser(null); }
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    if (!authApi.hasSession()) {
+      if (window.location.pathname !== "/login") {
+        sessionStorage.setItem("vads.return_path", window.location.pathname);
+        window.history.replaceState({}, "", "/login");
+      }
+      setChecking(false);
+      return;
+    }
+
+    authApi.me()
+      .then((currentUser) => {
+        setUser(currentUser);
+        if (window.location.pathname === "/" || window.location.pathname === "/login") {
+          window.history.replaceState({}, "", currentUser.role === "ADMIN" ? "/admin/accounts/new" : "/dashboard");
+        }
+      })
+      .catch(() => {
+        authApi.clear();
+        window.history.replaceState({}, "", "/login");
+      })
+      .finally(() => setChecking(false));
+  }, []);
+
+  function handleLogin(currentUser: CurrentUser) {
+    const returnPath = sessionStorage.getItem("vads.return_path");
+    sessionStorage.removeItem("vads.return_path");
+    const defaultPath = currentUser.role === "ADMIN" ? "/admin/accounts/new" : "/dashboard";
+    const destination = returnPath && returnPath !== "/login" ? returnPath : defaultPath;
+    window.history.replaceState({}, "", destination);
+    setUser(currentUser);
+  }
+
+  async function logout() {
+    await authApi.logout();
+    window.history.replaceState({}, "", "/login");
+    setUser(null);
+  }
+
   if (checking) return <div className="min-h-screen grid place-items-center"><Loader2 className="animate-spin" /></div>;
-  if (!user) return <Login onSuccess={setUser} />;
+  if (!user) return <Login onSuccess={handleLogin} />;
   return user.role === "ADMIN" ? <AdminPortal currentUser={user} onLogout={logout} /> : <UserPortal currentUser={user} onLogout={logout} />;
 }
-

@@ -15,6 +15,50 @@ import {
 
 type Screen = "login" | "dashboard" | "documents" | "library" | "notebook" | "processing" | "tree";
 
+const PATH_BY_SCREEN: Record<Screen, string> = {
+  login: "/login",
+  dashboard: "/dashboard",
+  documents: "/documents",
+  library: "/library",
+  notebook: "/notebook",
+  processing: "/processing",
+  tree: "/tree",
+};
+
+interface AppRoute {
+  screen: Screen | null;
+  libraryLawSlug: string | null;
+  libraryChapterSlug: string | null;
+  documentSlug: string | null;
+  analysisSlug: string | null;
+  notebookTermSlug: string | null;
+}
+
+function normalizePath(pathname: string): string {
+  if (!pathname) return "/";
+  return pathname.endsWith("/") && pathname !== "/" ? pathname.slice(0, -1) : pathname;
+}
+
+function emptyRoute(screen: Screen | null): AppRoute {
+  return { screen, libraryLawSlug: null, libraryChapterSlug: null, documentSlug: null, analysisSlug: null, notebookTermSlug: null };
+}
+
+function routeFromPath(pathname: string): AppRoute {
+  const normalized = normalizePath(pathname);
+  const libraryMatch = normalized.match(/^\/library\/([^/]+)(?:\/chuong\/([^/]+))?$/);
+  if (libraryMatch) return { ...emptyRoute("library"), libraryLawSlug: decodeURIComponent(libraryMatch[1]), libraryChapterSlug: libraryMatch[2] ? decodeURIComponent(libraryMatch[2]) : null };
+  const documentMatch = normalized.match(/^\/documents\/([^/]+)$/);
+  if (documentMatch) return { ...emptyRoute("documents"), documentSlug: decodeURIComponent(documentMatch[1]) };
+  const notebookTermMatch = normalized.match(/^\/notebook\/term\/([^/]+)$/);
+  if (notebookTermMatch) return { ...emptyRoute("notebook"), notebookTermSlug: decodeURIComponent(notebookTermMatch[1]) };
+  const processingMatch = normalized.match(/^\/processing(?:\/([^/]+))?$/);
+  if (processingMatch) return { ...emptyRoute("processing"), analysisSlug: processingMatch[1] ? decodeURIComponent(processingMatch[1]) : null };
+  const treeMatch = normalized.match(/^\/tree(?:\/([^/]+))?$/);
+  if (treeMatch) return { ...emptyRoute("tree"), analysisSlug: treeMatch[1] ? decodeURIComponent(treeMatch[1]) : null };
+  const screen = Object.entries(PATH_BY_SCREEN).find(([, path]) => path === normalized);
+  return emptyRoute((screen?.[0] as Screen | undefined) ?? null);
+}
+
 interface DocNode {
   id: string;
   label: string;
@@ -2334,14 +2378,32 @@ const TITLES: Record<Screen, string> = {
 };
 
 export default function UserPortal({ currentUser, onLogout }: { currentUser: { full_name: string }; onLogout: () => void }) {
-  const [screen, setScreen] = useState<Screen>("dashboard");
+  const [route, setRoute] = useState<AppRoute>(() => {
+    const initial = routeFromPath(window.location.pathname);
+    return initial.screen && initial.screen !== "login" ? initial : emptyRoute("dashboard");
+  });
+  const screen = route.screen ?? "dashboard";
   const [collapsed, setCollapsed] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importData, setImportData] = useState<ImportData | null>(null);
 
-  const navigate = (s: Screen) => setScreen(s);
-  const handleImportSubmit = (data: ImportData) => { setImportData(data); setScreen("processing"); };
+  useEffect(() => {
+    const handlePopState = () => {
+      const next = routeFromPath(window.location.pathname);
+      setRoute(next.screen && next.screen !== "login" ? next : emptyRoute("dashboard"));
+    };
+    window.addEventListener("popstate", handlePopState);
+    const initial = routeFromPath(window.location.pathname);
+    if (!initial.screen || initial.screen === "login") window.history.replaceState({}, "", PATH_BY_SCREEN.dashboard);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const navigate = (nextScreen: Screen, path = PATH_BY_SCREEN[nextScreen]) => {
+    window.history.pushState({}, "", path);
+    setRoute(routeFromPath(path));
+  };
+  const handleImportSubmit = (data: ImportData) => { setImportData(data); navigate("processing"); };
 
   if (screen === "tree") return <WhiteboardScreen onNavigate={navigate} importData={importData} onProfile={() => setShowProfile(true)} onImport={() => setShowImport(true)} />;
 
@@ -2350,7 +2412,7 @@ export default function UserPortal({ currentUser, onLogout }: { currentUser: { f
       <MainLayout active="dashboard" title="Đang xử lý tài liệu" onNavigate={navigate} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onProfile={() => setShowProfile(true)} onImport={() => setShowImport(true)}>
         <div className="h-96 flex items-center justify-center"><p className="text-gray-400 text-sm">Đang phân tích...</p></div>
       </MainLayout>
-      <ProcessingScreen onComplete={() => setScreen("tree")} />
+      <ProcessingScreen onComplete={() => navigate("tree", route.analysisSlug ? `/tree/${encodeURIComponent(route.analysisSlug)}` : PATH_BY_SCREEN.tree)} />
     </>
   );
 
@@ -2368,4 +2430,3 @@ export default function UserPortal({ currentUser, onLogout }: { currentUser: { f
     </>
   );
 }
-
