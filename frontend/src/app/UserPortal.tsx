@@ -188,7 +188,6 @@ const SUMMARY_TABS = [
 const INIT_CHAT = [{ role: "assistant", text: "Xin chào! Tôi là trợ lý AI phân tích tài liệu. Hãy đặt câu hỏi về nội dung tài liệu NĐ 15/2021/NĐ-CP." }];
 let ACTIVE_DOCUMENT_ID: string | null = null;
 
-<<<<<<< HEAD
 const HIGHLIGHT_TERMS = [
   { term: "vốn đầu tư công", definition: "Nguồn vốn thuộc ngân sách nhà nước, vốn từ nguồn thu hợp pháp của các cơ quan nhà nước dùng để đầu tư.", sectionId: "dieu-1" },
   { term: "nhà thầu", definition: "Tổ chức, cá nhân có năng lực, kinh nghiệm cung cấp dịch vụ tư vấn, thực hiện gói thầu xây lắp hoặc cung cấp hàng hóa theo hợp đồng.", sectionId: "dieu-2" },
@@ -215,16 +214,6 @@ const DOCUMENT_SECTIONS = [
   { id: "dieu-9", heading: "Điều 9. Giám sát thi công xây dựng", content: "Chủ đầu tư phải tổ chức giám sát thi công xây dựng công trình trong suốt quá trình thi công. Nhà thầu giám sát phải có đủ điều kiện năng lực theo quy định, thực hiện giám sát chất lượng, khối lượng, tiến độ và an toàn lao động. Kết quả giám sát được lập thành nhật ký thi công và báo cáo định kỳ gửi chủ đầu tư." },
   { id: "dieu-10", heading: "Điều 10. Nghiệm thu và bàn giao công trình", content: "Nghiệm thu công trình xây dựng được thực hiện theo các bước: nghiệm thu từng công việc, nghiệm thu giai đoạn thi công, nghiệm thu hoàn thành hạng mục công trình và nghiệm thu hoàn thành toàn bộ công trình. Sau khi hoàn thành nghiệm thu, chủ đầu tư tổ chức bàn giao công trình cho đơn vị quản lý, vận hành khai thác theo quyết định của cơ quan có thẩm quyền." },
 ];
-=======
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Không có ngày';
-  return new Intl.DateTimeFormat('vi-VN', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  }).format(date);
-}
->>>>>>> a052c4ae334d6b5272ccdd88b2139773d3d8e12a
 
 const LAW_FULL_TEXT: Record<number, { id: string; heading: string; content: string }[]> = {
   1: [
@@ -1966,20 +1955,12 @@ function WhiteboardScreen({ onNavigate, importData, onProfile, onImport }: { onN
   };
   const handleMouseUp = () => setIsDragging(false);
 
-<<<<<<< HEAD
   // Root node → open document viewer; white nodes → show summary tooltip
   const handleNodeSelect = (node: DocNode) => {
     if (node.type === "root") {
       setShowDocViewer(true);
       setSelected(null);
       return;
-=======
-  async function handleUpload(files: File[]) {
-    const acceptedIds: string[] = [];
-    for (const file of files) {
-      const result = await uploadDocument(file);
-      acceptedIds.push(result.document_id);
->>>>>>> a052c4ae334d6b5272ccdd88b2139773d3d8e12a
     }
     setSelected(prev => prev?.id === node.id ? null : node);
   };
