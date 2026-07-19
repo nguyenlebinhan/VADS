@@ -13,6 +13,7 @@ import {
 import {
   askLegacyDocument,
   loadLegacyGraph,
+  loadLegacyKnowledgeTerms,
   loadLegacyPortalData,
   uploadLegacyDocument,
   type LegacyDocument,
@@ -2393,6 +2394,17 @@ export default function UserPortal({ currentUser, onLogout }: { currentUser: Use
           LEGAL_LIBRARY = data.laws;
           Object.assign(LAW_DETAILS, data.lawDetails);
           setPortalDataVersion(version => version + 1);
+          void loadLegacyKnowledgeTerms(data.documents)
+            .then(terms => {
+              if (cancelled) return;
+              KNOWLEDGE_TERMS = terms;
+              setPortalDataVersion(version => version + 1);
+            })
+            .catch(reason => {
+              if (!cancelled) {
+                window.alert(reason instanceof Error ? reason.message : "KhÃ´ng thá»ƒ táº£i sá»• tay kiáº¿n thá»©c.");
+              }
+            });
         })
         .catch(reason => {
           if (!cancelled) {

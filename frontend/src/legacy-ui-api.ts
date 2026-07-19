@@ -138,6 +138,34 @@ export async function uploadLegacyDocument(file: File): Promise<void> {
   await uploadDocument(file);
 }
 
+function termsFromGraph(graph: KnowledgeGraph, document: LegacyDocument): LegacyKnowledgeTerm[] {
+  return graph.nodes.map(node => ({
+    id: `${document.id}:${node.id}`,
+    term: node.name,
+    definition: node.canonicalName || String(node.properties.description ?? node.name),
+    source: document.name,
+    category: node.type.replaceAll("_", " "),
+    highlightTerm: node.name,
+  }));
+}
+
+export async function loadLegacyKnowledgeTerms(
+  documents: LegacyDocument[],
+): Promise<LegacyKnowledgeTerm[]> {
+  const settled = await Promise.all(
+    documents.map(async document => {
+      try {
+        return termsFromGraph(await getKnowledgeGraph(document.id), document);
+      } catch (reason) {
+        if (reason instanceof ApiError && reason.code === "KNOWLEDGE_GRAPH_NOT_FOUND") {
+          return [];
+        }
+        throw reason;
+      }
+    }),
+  );
+  return settled.flat();
+}
 async function graphFor(documentId: string): Promise<KnowledgeGraph> {
   try {
     return await getKnowledgeGraph(documentId);
@@ -193,14 +221,7 @@ export async function loadLegacyGraph(
       })),
     })),
   };
-  const terms = graph.nodes.map(node => ({
-    id: node.id,
-    term: node.name,
-    definition: node.canonicalName || String(node.properties.description ?? node.name),
-    source: document.name,
-    category: node.type.replaceAll("_", " "),
-    highlightTerm: node.name,
-  }));
+  const terms = termsFromGraph(graph, document);
   return { tree, terms };
 }
 
