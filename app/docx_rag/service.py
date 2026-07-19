@@ -24,7 +24,10 @@ PAGE_NOTE = (
     "page_number is null because DOCX uses a flowing layout and does not store a stable, "
     "device-independent page number."
 )
-SOURCE_MARKER_RE = re.compile(r"\[(?:Nguồn|Source)\s+(\d+)]", re.IGNORECASE)
+SOURCE_MARKER_RE = re.compile(
+    r"\s*\[(?:Nguon|Nguồn|Source)\s+(\d+)\]\s*",
+    re.IGNORECASE,
+)
 
 
 class DocxRagService:
@@ -150,6 +153,7 @@ class DocxRagService:
             for match in SOURCE_MARKER_RE.finditer(answer)
             if 1 <= int(match.group(1)) <= len(results)
         }
+        answer = self._strip_source_markers(answer)
         selected = [
             result
             for number, result in enumerate(results, start=1)
@@ -164,7 +168,6 @@ class DocxRagService:
             page_note=PAGE_NOTE,
             embedding_error=embedding_error,
         )
-
     @staticmethod
     def _format_context(results: list[SearchResult]) -> str:
         sections: list[str] = []
@@ -179,13 +182,33 @@ class DocxRagService:
                         f"paragraph_indices={chunk.paragraph_indices or None}",
                         f"table_indices={chunk.table_indices or None}",
                         f"article={chunk.article}",
-                        f"clause={chunk.clause}",
+                        f"clause={DocxRagService._display_clause(chunk.clause)}",
                         "text:",
                         chunk.text,
                     ]
                 )
             )
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _display_clause(value: str | None) -> str | None:
+        if value is None:
+            return None
+        return re.sub(
+            r"^\s*(?:Khoản|Khoan)\s+",
+            "Mục ",
+            value,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    @staticmethod
+    def _strip_source_markers(answer: str) -> str:
+        cleaned = SOURCE_MARKER_RE.sub(" ", answer)
+        cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
 
     @staticmethod
     def _best_quote(text: str, question: str, *, max_chars: int = 600) -> str:
@@ -210,7 +233,7 @@ class DocxRagService:
             paragraph_indices=chunk.paragraph_indices,
             table_indices=chunk.table_indices,
             article=chunk.article,
-            clause=chunk.clause,
+            clause=self._display_clause(chunk.clause),
             page_number=None,
             quote=self._best_quote(chunk.text, question),
             score=result.score,

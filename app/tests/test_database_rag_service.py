@@ -17,6 +17,9 @@ class FakeRagClient:
         assert question == "Thoi han nop bao cao la bao lau?"
         assert "document_id=" in context
         assert "30 ngay" in context
+        assert "article=Dieu 3" in context
+        assert "clause=Mục 1" in context
+        assert "clause=Khoản 1" not in context
         return "Thoi han nop bao cao la 30 ngay. [Nguon 1]"
 
 
@@ -99,6 +102,8 @@ def test_database_rag_reads_persisted_document_chunks(
                 normalized_content="thoi han nop bao cao la 30 ngay ke tu ngay ban hanh.",
                 pdf_page_start=0,
                 pdf_page_end=0,
+                article="Dieu 3",
+                clause="Khoản 1",
                 start_block_id=block.id,
                 end_block_id=block.id,
                 token_count=12,
@@ -115,7 +120,9 @@ def test_database_rag_reads_persisted_document_chunks(
         )
 
     assert result.retrieval_mode == "database_lexical"
-    assert result.answer == "Thoi han nop bao cao la 30 ngay. [Nguon 1]"
+    assert result.answer == "Thoi han nop bao cao la 30 ngay."
     assert result.sources[0].document_id == document.id
     assert result.sources[0].document_title == "Quy dinh bao cao"
     assert result.sources[0].page_number == 1
+    assert result.sources[0].article == "Dieu 3"
+    assert result.sources[0].clause == "Mục 1"

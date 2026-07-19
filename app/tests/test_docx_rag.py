@@ -34,7 +34,8 @@ class FakeOpenAIClient:
         return [[float("năm" in text.casefold()), 1.0] for text in texts]
 
     def answer_with_context(self, *, question: str, context: str) -> str:
-        del question, context
+        del question
+        assert "clause=Khoản 1" not in context
         return "Thời hạn lưu hồ sơ là năm năm. [Nguồn 1]"
 
 
@@ -147,9 +148,10 @@ class DocxRagTest(unittest.TestCase):
             result = service.answer("Hồ sơ lưu bao nhiêu năm?", top_k=1)
 
             self.assertEqual("embedding", result.retrieval_mode)
+            self.assertEqual("Thời hạn lưu hồ sơ là năm năm.", result.answer)
             self.assertEqual("policy.docx", result.sources[0].file_name)
             self.assertEqual("Điều 3", result.sources[0].article)
-            self.assertEqual("Khoản 1", result.sources[0].clause)
+            self.assertEqual("Mục 1", result.sources[0].clause)
             self.assertIsNone(result.sources[0].page_number)
 
     def test_service_falls_back_to_lexical_when_embeddings_fail(self) -> None:
