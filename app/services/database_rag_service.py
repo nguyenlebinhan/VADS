@@ -21,7 +21,10 @@ from app.model.users import User
 from app.policies.document_policy import DocumentPolicy
 from app.schemas.rag import RagQueryRequest, RagQueryResponse, RagSourcePublic
 
-SOURCE_MARKER_RE = re.compile(r"\[(?:Nguon|Nguồn|Source)\s+(\d+)]", re.IGNORECASE)
+SOURCE_MARKER_RE = re.compile(
+    r"\s*\[(?:Nguon|Nguồn|Source)\s+(\d+)\]\s*",
+    re.IGNORECASE,
+)
 
 
 class DatabaseRagService:
@@ -90,6 +93,7 @@ class DatabaseRagService:
             for match in SOURCE_MARKER_RE.finditer(answer)
             if 1 <= int(match.group(1)) <= len(results)
         }
+        answer = self._strip_source_markers(answer)
         selected = [
             result
             for number, result in enumerate(results, start=1)
@@ -107,7 +111,7 @@ class DatabaseRagService:
                     chunk_id=result.chunk.chunk_id,
                     page_number=result.chunk.page_number,
                     article=result.chunk.article,
-                    clause=result.chunk.clause,
+                    clause=self._display_clause(result.chunk.clause),
                     quote=self._best_quote(result.chunk.text, payload.question),
                     score=result.score,
                 )
@@ -178,13 +182,33 @@ class DatabaseRagService:
                         f"chunk_id={chunk.chunk_id}",
                         f"page_number={chunk.page_number}",
                         f"article={chunk.article}",
-                        f"clause={chunk.clause}",
+                        f"clause={DatabaseRagService._display_clause(chunk.clause)}",
                         "text:",
                         chunk.text,
                     ]
                 )
             )
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _display_clause(value: str | None) -> str | None:
+        if value is None:
+            return None
+        return re.sub(
+            r"^\s*(?:Khoản|Khoan)\s+",
+            "Mục ",
+            value,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    @staticmethod
+    def _strip_source_markers(answer: str) -> str:
+        cleaned = SOURCE_MARKER_RE.sub(" ", answer)
+        cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
 
     @staticmethod
     def _best_quote(text: str, question: str, *, max_chars: int = 600) -> str:

@@ -272,6 +272,7 @@ export interface KnowledgeGraphGenerationResult {
 }
 
 interface ErrorEnvelope {
+  success?: boolean;
   error?: {
     code?: string;
     message?: string;
@@ -386,7 +387,21 @@ async function request<T>(
   }
   if (!response.ok) throw await apiError(response);
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  const payload = (await response.json()) as T | ErrorEnvelope;
+  if (
+    typeof payload === 'object'
+    && payload !== null
+    && 'success' in payload
+    && payload.success === false
+  ) {
+    throw new ApiError(
+      payload.error?.message || 'Request failed.',
+      response.status,
+      payload.error?.code,
+      payload.error?.details,
+    );
+  }
+  return payload as T;
 }
 
 export async function login(identifier: string, password: string): Promise<TokenPair> {
