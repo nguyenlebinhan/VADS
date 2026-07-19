@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 import {
-  ApiError, changePassword, deleteDocument, listDocuments, queryDocumentRag,
+  changePassword, deleteDocument, listDocuments, queryDocumentRag,
   reprocessDocument, uploadDocument, type DocumentPublic, type RagQueryResult,
   type UserPublic,
 } from '../api';
@@ -66,14 +66,6 @@ const NAV_ITEMS: Array<{ id: Screen; label: string; icon: React.ElementType }> =
 
 function messageOf(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'Không thể kết nối tới máy chủ.';
-}
-
-function duplicateDocumentId(reason: unknown): string | null {
-  if (!(reason instanceof ApiError) || reason.code !== 'DUPLICATE_DOCUMENT') return null;
-  if (!reason.details || typeof reason.details !== 'object') return null;
-  const details = reason.details as Record<string, unknown>;
-  const documentId = details.existingDocumentId ?? details.existing_document_id;
-  return typeof documentId === 'string' && documentId.length > 0 ? documentId : null;
 }
 
 function formatDate(value: string): string {
@@ -782,16 +774,8 @@ export default function UserPortal({ currentUser, onLogout }: {
   async function handleUpload(files: File[]) {
     const acceptedIds: string[] = [];
     for (const file of files) {
-      try {
-        const result = await uploadDocument(file);
-        acceptedIds.push(result.document_id);
-      } catch (reason) {
-        const existingId = duplicateDocumentId(reason);
-        if (!existingId) throw reason;
-        acceptedIds.push(existingId);
-        const existing = documents.find(document => document.id === existingId);
-        if (existing && ['FAILED', 'CANCELLED'].includes(existing.status)) await reprocessDocument(existingId);
-      }
+      const result = await uploadDocument(file);
+      acceptedIds.push(result.document_id);
     }
     await loadDocuments();
     setScreen('documents');
