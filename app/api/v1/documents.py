@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Path, Query, Request, Response, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -13,8 +13,10 @@ from app.database.async_session import get_async_db
 from app.dependencies.permissions import require_permission
 from app.exceptions import NotFoundError
 from app.model.documents import Document
+from app.model.security import DocumentGrantPermission, DocumentPermission
 from app.model.users import User
 from app.model.workspaces import Workspace, WorkspaceStatus
+from app.policies.document_policy import DocumentPolicy
 from app.schemas.document import DocumentPublic, DocumentUploadPublic, document_to_public
 from app.service.documents import DocumentService
 from app.services.document_service import SecureDocumentService
@@ -58,6 +60,43 @@ def get_owned_document(session: Session, actor: User, document_id: str) -> Docum
         )
     )
     if document is None:
+        raise NotFoundError("DOCUMENT", document_id)
+    return document
+
+
+def get_visible_document(session: Session, actor: User, document_id: str) -> Document:
+    document = session.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.commune_id == actor.commune_id,
+            Document.is_deleted.is_(False),
+            Document.deleted_at.is_(None),
+        )
+    )
+    if document is None:
+        raise NotFoundError("DOCUMENT", document_id)
+
+    explicit_access = False
+    if document.owner_id != actor.id:
+        explicit_access = bool(
+            session.scalar(
+                select(
+                    exists().where(
+                        DocumentPermission.document_id == document.id,
+                        DocumentPermission.commune_id == actor.commune_id,
+                        DocumentPermission.user_id == actor.id,
+                        DocumentPermission.permission.in_(
+                            [DocumentGrantPermission.READ, DocumentGrantPermission.ASK]
+                        ),
+                    )
+                )
+            )
+        )
+    if not DocumentPolicy.can_read(
+        actor,
+        document,
+        has_explicit_access=explicit_access,
+    ):
         raise NotFoundError("DOCUMENT", document_id)
     return document
 

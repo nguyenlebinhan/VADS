@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.orm import Session
 
-from app.api.v1.documents import get_owned_document
+from app.api.v1.documents import get_visible_document
 from app.common.contracts import ApiSuccessResponse
 from app.config.database import get_db
 from app.core.permissions import Permission
@@ -35,7 +35,7 @@ def generate_owned_knowledge_graph(
     planner: Annotated[ExecutionPlanner, Depends(get_execution_planner)],
     body: GenerationRequest | None = None,
 ) -> ApiSuccessResponse[KnowledgeGraphGenerationResult]:
-    get_owned_document(session, actor, document_id)
+    get_visible_document(session, actor, document_id)
     return generate_knowledge_graph(
         document_id=document_id,
         session=session,
@@ -54,5 +54,5 @@ def get_owned_knowledge_graph(
     actor: Annotated[User, Depends(require_permission(Permission.DOCUMENTS_READ_OWN))],
     session: Annotated[Session, Depends(get_db)],
 ) -> ApiSuccessResponse[KnowledgeGraphView]:
-    get_owned_document(session, actor, document_id)
+    get_visible_document(session, actor, document_id)
     return get_knowledge_graph(document_id=document_id, session=session)

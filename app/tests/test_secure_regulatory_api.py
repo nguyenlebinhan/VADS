@@ -126,6 +126,18 @@ def test_secure_intelligence_routes_require_auth_and_scope_documents_to_owner(
             must_change_password=False,
             status=UserStatus.ACTIVE,
         )
+        admin_a = User(
+            id=str(uuid4()),
+            commune_id=commune_a.id,
+            username="regulatory.admin",
+            email="regulatory.admin@example.gov.vn",
+            full_name="Quản trị viên A",
+            role=UserRole.ADMIN,
+            password_hash=hash_password(PASSWORD),
+            is_active=True,
+            must_change_password=False,
+            status=UserStatus.ACTIVE,
+        )
         user_b = User(
             id=str(uuid4()),
             commune_id=commune_b.id,
@@ -141,7 +153,16 @@ def test_secure_intelligence_routes_require_auth_and_scope_documents_to_owner(
         workspace_a = Workspace(id=str(uuid4()), name="Regulatory A", owner_id=user_a.id)
         workspace_b = Workspace(id=str(uuid4()), name="Regulatory B", owner_id=user_b.id)
         session.add_all(
-            [province, commune_a, commune_b, user_a, user_b, workspace_a, workspace_b]
+            [
+                province,
+                commune_a,
+                commune_b,
+                user_a,
+                admin_a,
+                user_b,
+                workspace_a,
+                workspace_b,
+            ]
         )
         session.flush()
         own = _seed_regulatory_document(
@@ -255,6 +276,13 @@ def test_secure_intelligence_routes_require_auth_and_scope_documents_to_owner(
         "Báo cáo định kỳ",
     }
     assert graph_data["edges"][0]["type"] == "SUBMITS"
+
+    admin_headers = _login(client, "regulatory.admin")
+    admin_graph = client.get(
+        f"/api/v1/documents/{own_id}/knowledge-graph",
+        headers=admin_headers,
+    )
+    assert admin_graph.status_code == 200, admin_graph.text
 
     graph_cross_tenant = client.get(
         f"/api/v1/documents/{other_id}/knowledge-graph",
